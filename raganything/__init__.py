@@ -64,6 +64,7 @@ __url__ = "https://github.com/HKUDS/RAG-Anything"
 __all__ = [
     "RAGAnything",
     "RAGAnythingConfig",
+    "PDFRangePipeline",
     "Parser",
 ]
 
@@ -112,3 +113,11 @@ if "set_prompt_language" in globals():
 def get_version() -> str:
     """Return the RAG-Anything version string."""
     return __version__
+
+
+def __getattr__(name: str):
+    if name == "PDFRangePipeline":
+        from .pdf_range_pipeline import PDFRangePipeline
+
+        return PDFRangePipeline
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
