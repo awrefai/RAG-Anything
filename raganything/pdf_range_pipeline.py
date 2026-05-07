@@ -310,6 +310,7 @@ def main() -> int:
     parser.add_argument("--lang", help="OCR language hint")
     parser.add_argument("--device", help="MinerU device, for example cpu or cuda:0")
     parser.add_argument("--backend", help="MinerU backend")
+    parser.add_argument("--vlm-url", help="VLM service URL for vlm-http-client")
     parser.add_argument("--source", help="MinerU model source")
     parser.add_argument(
         "--no-formula", action="store_true", help="Disable formula parsing"
@@ -334,6 +335,7 @@ def main() -> int:
         lang=args.lang,
         device=args.device,
         backend=args.backend,
+        vlm_url=args.vlm_url,
         source=args.source,
         formula=not args.no_formula,
         table=not args.no_table,

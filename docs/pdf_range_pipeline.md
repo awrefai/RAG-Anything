@@ -15,6 +15,26 @@ python -m raganything.pdf_range_pipeline large.pdf \
   --device cpu
 ```
 
+Or use the project starter:
+
+```bash
+python start.py large-pdf large.pdf \
+  --output ./large_pdf_output \
+  --page-window 100 \
+  --retries 1 \
+  --device cpu
+```
+
+For VLM HTTP mode:
+
+```bash
+python start.py large-pdf large.pdf \
+  --output ./large_pdf_output \
+  --page-window 100 \
+  --backend vlm-http-client \
+  --vlm-url http://127.0.0.1:30000
+```
+
 Outputs:
 
 - `large_pdf_output/ranges/`: one parser output folder per page range
