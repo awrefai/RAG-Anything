@@ -100,6 +100,13 @@ class ProcessorMixin:
         """Return a stable UTC timestamp for doc_status bookkeeping."""
         return time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())
 
+    def _get_doc_status_storage(self):
+        """Return LightRAG doc_status storage when it is available."""
+        lightrag = getattr(self, "lightrag", None)
+        if lightrag is None:
+            return None
+        return getattr(lightrag, "doc_status", None)
+
     async def _ensure_doc_status_record(
         self,
         doc_id: str,
@@ -109,10 +116,6 @@ class ProcessorMixin:
         status: DocStatus = DocStatus.READY,
     ) -> Dict[str, Any]:
         """Create a minimal doc_status entry when LightRAG has not created one yet."""
-        current_doc_status = await self.lightrag.doc_status.get_by_id(doc_id)
-        if current_doc_status:
-            return current_doc_status
-
         timestamp = self._current_doc_status_timestamp()
         doc_status_payload: Dict[str, Any] = {
             "status": status,
@@ -129,9 +132,17 @@ class ProcessorMixin:
         if scheme_name is not None:
             doc_status_payload["scheme_name"] = scheme_name
 
-        await self.lightrag.doc_status.upsert({doc_id: doc_status_payload})
-        await self.lightrag.doc_status.index_done_callback()
-        return await self.lightrag.doc_status.get_by_id(doc_id) or doc_status_payload
+        doc_status_storage = self._get_doc_status_storage()
+        if doc_status_storage is None:
+            return doc_status_payload
+
+        current_doc_status = await doc_status_storage.get_by_id(doc_id)
+        if current_doc_status:
+            return current_doc_status
+
+        await doc_status_storage.upsert({doc_id: doc_status_payload})
+        await doc_status_storage.index_done_callback()
+        return await doc_status_storage.get_by_id(doc_id) or doc_status_payload
 
     async def _upsert_doc_status(
         self,
@@ -152,8 +163,12 @@ class ProcessorMixin:
             **updates,
             "updated_at": self._current_doc_status_timestamp(),
         }
-        await self.lightrag.doc_status.upsert({doc_id: updated_doc_status})
-        await self.lightrag.doc_status.index_done_callback()
+        doc_status_storage = self._get_doc_status_storage()
+        if doc_status_storage is None:
+            return updated_doc_status
+
+        await doc_status_storage.upsert({doc_id: updated_doc_status})
+        await doc_status_storage.index_done_callback()
         return updated_doc_status
 
     async def _get_multimodal_status_record(self, doc_id: str) -> Dict[str, Any] | None:
@@ -1155,9 +1170,9 @@ class ProcessorMixin:
                     table_img_path=table_img_path,
                     table_caption=", ".join(table_caption) if table_caption else "None",
                     table_body=table_body,
-                    table_footnote=", ".join(table_footnote)
-                    if table_footnote
-                    else "None",
+                    table_footnote=(
+                        ", ".join(table_footnote) if table_footnote else "None"
+                    ),
                     enhanced_caption=description,
                 )
 
@@ -1848,7 +1863,9 @@ class ProcessorMixin:
         doc_pre_id = f"doc-pre-{file_name}"
         pipeline_status = None
         pipeline_status_lock = None
-        current_doc_status = {}  # initialised here so the except block can always unpack it
+        current_doc_status = (
+            {}
+        )  # initialised here so the except block can always unpack it
 
         async def mark_initialization_failed(error_msg: str) -> None:
             """Persist init failures when LightRAG doc_status is already available."""

@@ -23,6 +23,7 @@ def test_get_parser_rejects_unknown_parser():
 
 def test_parser_module_import_does_not_import_paddleocr():
     sys.modules.pop("paddleocr", None)
+    sys.modules["raganything.parser"] = parser_module
     importlib.reload(parser_module)
     assert "paddleocr" not in sys.modules
 

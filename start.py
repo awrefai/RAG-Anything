@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import argparse
 import os
+import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -32,9 +34,19 @@ SOURCES = ["huggingface", "modelscope", "local"]
 
 def run_command(args: List[str]) -> int:
     print("\nRunning:")
-    print(" ".join(args))
+    print(shlex.join(args))
     print()
     return subprocess.call(args)
+
+
+def module_main_command(module: str, *args: str) -> List[str]:
+    """Run a module CLI through main() without runpy pre-import warnings."""
+    return [
+        sys.executable,
+        "-c",
+        f"from {module} import main; raise SystemExit(main())",
+        *args,
+    ]
 
 
 def add_parser_options(parser: argparse.ArgumentParser) -> None:
@@ -91,12 +103,7 @@ def append_common_parser_args(command: List[str], args: argparse.Namespace) -> N
 
 
 def handle_parse(args: argparse.Namespace) -> int:
-    command = [
-        sys.executable,
-        "-m",
-        "raganything.parser",
-        args.file,
-    ]
+    command = module_main_command("raganything.parser", args.file)
     if args.output:
         command.extend(["--output", args.output])
     append_common_parser_args(command, args)
@@ -106,9 +113,7 @@ def handle_parse(args: argparse.Namespace) -> int:
 
 
 def handle_batch(args: argparse.Namespace) -> int:
-    command = [
-        sys.executable,
-        "-m",
+    command = module_main_command(
         "raganything.batch_parser",
         *args.paths,
         "--output",
@@ -121,7 +126,7 @@ def handle_batch(args: argparse.Namespace) -> int:
         str(args.workers),
         "--timeout",
         str(args.timeout),
-    ]
+    )
     if args.recursive:
         command.append("--recursive")
     if args.no_progress:
@@ -132,9 +137,7 @@ def handle_batch(args: argparse.Namespace) -> int:
 
 
 def handle_large_pdf(args: argparse.Namespace) -> int:
-    command = [
-        sys.executable,
-        "-m",
+    command = module_main_command(
         "raganything.pdf_range_pipeline",
         args.pdf,
         "--output",
@@ -145,7 +148,7 @@ def handle_large_pdf(args: argparse.Namespace) -> int:
         args.method,
         "--retries",
         str(args.retries),
-    ]
+    )
     if args.total_pages:
         command.extend(["--total-pages", str(args.total_pages)])
     if args.no_resume:
@@ -187,28 +190,36 @@ def handle_rag(args: argparse.Namespace) -> int:
 
 
 def handle_check(args: argparse.Namespace) -> int:
-    command = [
-        sys.executable,
-        "-m",
+    command = module_main_command(
         "raganything.parser",
         "dummy",
         "--check",
         "--parser",
         args.parser,
-    ]
+    )
     return run_command(command)
 
 
 def handle_markdown_pdf(args: argparse.Namespace) -> int:
-    command = [
-        sys.executable,
-        "-m",
+    method = args.method or "reportlab"
+    if method == "reportlab":
+        from raganything.parser import Parser
+
+        output_path = Path(args.output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        generated_path = Parser.convert_text_to_pdf(args.input, str(output_path.parent))
+        if generated_path.resolve() != output_path.resolve():
+            shutil.move(str(generated_path), str(output_path))
+        print(f"Successfully converted {args.input} to {output_path}")
+        return 0
+
+    command = module_main_command(
         "raganything.enhanced_markdown",
         args.input,
+        "--output",
         args.output,
-    ]
-    if args.method:
-        command.extend(["--method", args.method])
+    )
+    command.extend(["--method", method])
     return run_command(command)
 
 
@@ -428,7 +439,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     markdown_parser.add_argument("input", help="Markdown input file")
     markdown_parser.add_argument("output", help="PDF output file")
-    markdown_parser.add_argument("--method", choices=["auto", "weasyprint", "pandoc"])
+    markdown_parser.add_argument(
+        "--method",
+        choices=["reportlab", "auto", "weasyprint", "pandoc", "pandoc_system"],
+        default="reportlab",
+    )
     markdown_parser.set_defaults(func=handle_markdown_pdf)
 
     return parser

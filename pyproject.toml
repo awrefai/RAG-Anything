@@ -82,6 +82,7 @@ version = {attr = "raganything.__version__"}
 target-version = "py310"
 
 [tool.pytest.ini_options]
+addopts = "-s"
 testpaths = ["tests"]
 python_files = ["test*.py"]
 norecursedirs = ["examples"]

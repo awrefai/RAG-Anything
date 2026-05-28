@@ -201,6 +201,10 @@ class TestRAGAnythingIntegration:
             file_path, output_dir, parse_method, display_stats, **kwargs
         ):
             # Single text block, no multimodal content.
+            rag.callback_manager.dispatch("on_parse_start", file_path=file_path)
+            rag.callback_manager.dispatch(
+                "on_parse_complete", file_path=file_path, content_blocks=1
+            )
             return ([{"type": "text", "text": "hello world"}], "doc-123")
 
         async def fake_mm(items, file_path, doc_id):

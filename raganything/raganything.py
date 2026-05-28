@@ -455,8 +455,14 @@ class RAGAnything(QueryMixin, ProcessorMixin, BatchMixin):
 
             # Finalize LightRAG storages if LightRAG is initialized
             if self.lightrag is not None:
-                tasks.append(self.lightrag.finalize_storages())
-                self.logger.debug("Scheduled LightRAG storages finalization")
+                finalize_storages = getattr(self.lightrag, "finalize_storages", None)
+                if callable(finalize_storages):
+                    tasks.append(finalize_storages())
+                    self.logger.debug("Scheduled LightRAG storages finalization")
+                else:
+                    self.logger.debug(
+                        "LightRAG object has no finalize_storages method; skipping"
+                    )
 
             # Run all finalization tasks concurrently
             if tasks:
@@ -615,15 +621,15 @@ class RAGAnything(QueryMixin, ProcessorMixin, BatchMixin):
             },
             "config": self.get_config_info(),
             "models": {
-                "llm_model": "External function"
-                if self.llm_model_func
-                else "Not provided",
-                "vision_model": "External function"
-                if self.vision_model_func
-                else "Not provided",
-                "embedding_model": "External function"
-                if self.embedding_func
-                else "Not provided",
+                "llm_model": (
+                    "External function" if self.llm_model_func else "Not provided"
+                ),
+                "vision_model": (
+                    "External function" if self.vision_model_func else "Not provided"
+                ),
+                "embedding_model": (
+                    "External function" if self.embedding_func else "Not provided"
+                ),
             },
         }
 
