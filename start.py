@@ -153,6 +153,10 @@ def handle_large_pdf(args: argparse.Namespace) -> int:
         command.extend(["--total-pages", str(args.total_pages)])
     if args.no_resume:
         command.append("--no-resume")
+    if not args.adaptive_page_window:
+        command.append("--no-adaptive-page-window")
+    if args.min_page_window:
+        command.extend(["--min-page-window", str(args.min_page_window)])
     if args.lang:
         command.extend(["--lang", args.lang])
     if args.backend:
@@ -284,14 +288,16 @@ def interactive() -> int:
     if selection == "2":
         pdf = prompt("PDF path")
         output = prompt("Output directory", "./large_pdf_output")
-        page_window = prompt("Pages per range", "100")
+        page_window = prompt("Pages per MinerU run (0 = try whole PDF)", "0")
         method = prompt("Method", "auto", METHODS)
         backend = prompt("Backend", "pipeline", BACKENDS)
         vlm_url = ""
         if backend == "vlm-http-client":
             vlm_url = prompt("VLM URL", "http://127.0.0.1:30000")
         device = prompt("Device", "cpu")
-        retries = prompt("Retries per range", "1")
+        retries = prompt("Retries per run", "1")
+        adaptive = prompt_yes_no("Split automatically if the run is too large", True)
+        min_page_window = prompt("Smallest adaptive page window", "25")
         command = [
             python,
             "start.py",
@@ -309,7 +315,11 @@ def interactive() -> int:
             device,
             "--retries",
             retries,
+            "--min-page-window",
+            min_page_window,
         ]
+        if not adaptive:
+            command.append("--no-adaptive-page-window")
         if vlm_url:
             command.extend(["--vlm-url", vlm_url])
         return run_command(command)
@@ -407,11 +417,23 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     pdf_parser.add_argument("pdf", help="PDF path")
     pdf_parser.add_argument("--output", "-o", required=True, help="Output directory")
-    pdf_parser.add_argument("--page-window", type=int, default=100)
+    pdf_parser.add_argument(
+        "--page-window",
+        type=int,
+        default=0,
+        help="Pages per MinerU run. Use 0 to try the whole PDF in one run.",
+    )
     pdf_parser.add_argument("--total-pages", type=int)
     pdf_parser.add_argument("--method", choices=METHODS, default="auto")
     pdf_parser.add_argument("--retries", type=int, default=1)
     pdf_parser.add_argument("--no-resume", action="store_true")
+    pdf_parser.add_argument(
+        "--adaptive-page-window",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Split a failed range into smaller ranges until it fits the device.",
+    )
+    pdf_parser.add_argument("--min-page-window", type=int, default=25)
     pdf_parser.add_argument("--lang")
     pdf_parser.add_argument("--backend", choices=BACKENDS, default="pipeline")
     pdf_parser.add_argument("--vlm-url")

@@ -30,6 +30,15 @@ class FakeParser:
         return content_list
 
 
+class SizeLimitedParser:
+    def parse_pdf(self, pdf_path, output_dir, method="auto", **kwargs):
+        start_page = kwargs["start_page"]
+        end_page = kwargs["end_page"]
+        if end_page - start_page + 1 > 50:
+            raise RuntimeError("range too large")
+        return FakeParser().parse_pdf(pdf_path, output_dir, method, **kwargs)
+
+
 def test_build_ranges_uses_inclusive_end_pages():
     assert PDFRangePipeline.build_ranges(total_pages=250, page_window=100) == [
         (0, 99),
@@ -87,3 +96,34 @@ def test_process_pdf_resumes_existing_range(tmp_path):
     assert result.ranges[0].status == "skipped"
     merged_md = Path(result.merged_markdown_file).read_text(encoding="utf-8")
     assert "# existing" in merged_md
+
+
+def test_build_ranges_zero_page_window_means_single_run():
+    assert PDFRangePipeline.build_ranges(total_pages=250, page_window=0) == [(0, 249)]
+
+
+def test_process_pdf_adaptively_splits_failed_large_ranges(tmp_path):
+    pdf_path = tmp_path / "large.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n")
+    output_dir = tmp_path / "out"
+
+    pipeline = PDFRangePipeline(parser_factory=SizeLimitedParser)
+    result = pipeline.process_pdf(
+        pdf_path=pdf_path,
+        output_dir=output_dir,
+        page_window=0,
+        total_pages=120,
+        adaptive_page_window=True,
+        min_page_window=25,
+    )
+
+    assert [(item.start_page, item.end_page) for item in result.ranges] == [
+        (0, 29),
+        (30, 59),
+        (60, 89),
+        (90, 119),
+    ]
+    assert all(item.status == "success" for item in result.ranges)
+    with Path(result.merged_content_list_file).open("r", encoding="utf-8") as file:
+        merged_content = json.load(file)
+    assert [item["page_idx"] for item in merged_content] == [0, 30, 60, 90]

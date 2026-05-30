@@ -59,7 +59,7 @@ class PDFRangePipelineResult:
             "PDF Range Pipeline Summary:\n"
             f"  PDF: {self.pdf_path}\n"
             f"  Total pages: {self.total_pages}\n"
-            f"  Page window: {self.page_window}\n"
+            f"  Page window: {self.page_window or 'all'}\n"
             f"  Ranges: {len(self.ranges)}\n"
             f"  Successful: {len(self.successful_ranges)}\n"
             f"  Failed: {len(self.failed_ranges)}\n"
@@ -100,8 +100,10 @@ class PDFRangePipeline:
     def build_ranges(total_pages: int, page_window: int) -> List[tuple[int, int]]:
         if total_pages <= 0:
             raise ValueError("total_pages must be greater than zero")
-        if page_window <= 0:
-            raise ValueError("page_window must be greater than zero")
+        if page_window < 0:
+            raise ValueError("page_window must be zero or greater")
+        if page_window == 0:
+            page_window = total_pages
 
         ranges: List[tuple[int, int]] = []
         for start_page in range(0, total_pages, page_window):
@@ -156,11 +158,13 @@ class PDFRangePipeline:
         self,
         pdf_path: str | Path,
         output_dir: str | Path,
-        page_window: int = 100,
+        page_window: int = 0,
         total_pages: Optional[int] = None,
         method: str = "auto",
         retries: int = 0,
         resume: bool = True,
+        adaptive_page_window: bool = True,
+        min_page_window: int = 25,
         merge_markdown: bool = True,
         merge_content_list: bool = True,
         **parser_kwargs: Any,
@@ -173,6 +177,8 @@ class PDFRangePipeline:
 
         total = total_pages or self.get_pdf_page_count(pdf_path)
         ranges = self.build_ranges(total, page_window)
+        if min_page_window <= 0:
+            raise ValueError("min_page_window must be greater than zero")
 
         output_path = Path(output_dir)
         ranges_dir = output_path / "ranges"
@@ -186,7 +192,10 @@ class PDFRangePipeline:
         merged_markdown_parts: List[str] = []
         merged_content_list_items: List[Dict[str, Any]] = []
 
-        for start_page, end_page in ranges:
+        range_queue = list(ranges)
+
+        while range_queue:
+            start_page, end_page = range_queue.pop(0)
             range_name = self._range_name(start_page, end_page)
             range_dir = ranges_dir / range_name
             range_dir.mkdir(parents=True, exist_ok=True)
@@ -239,6 +248,23 @@ class PDFRangePipeline:
                             attempt,
                             error,
                         )
+
+            if (
+                status == "failed"
+                and adaptive_page_window
+                and (end_page - start_page + 1) > min_page_window
+            ):
+                split_at = start_page + ((end_page - start_page + 1) // 2) - 1
+                left_range = (start_page, split_at)
+                right_range = (split_at + 1, end_page)
+                self.logger.warning(
+                    "Range %s is too large for this run; splitting into %s and %s",
+                    range_name,
+                    self._range_name(*left_range),
+                    self._range_name(*right_range),
+                )
+                range_queue[0:0] = [left_range, right_range]
+                continue
 
             elapsed = time.time() - started_at
             adjusted_content = self._offset_page_indices(content_list, start_page)
@@ -300,13 +326,30 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Process a large PDF by page ranges")
     parser.add_argument("pdf", help="PDF file to process")
     parser.add_argument("--output", "-o", required=True, help="Output directory")
-    parser.add_argument("--page-window", type=int, default=100, help="Pages per range")
+    parser.add_argument(
+        "--page-window",
+        type=int,
+        default=0,
+        help="Pages per MinerU run. Use 0 to try the whole PDF in one run.",
+    )
     parser.add_argument("--total-pages", type=int, help="Override detected page count")
     parser.add_argument(
         "--method", choices=["auto", "txt", "ocr"], default="auto", help="Parse method"
     )
     parser.add_argument("--retries", type=int, default=0, help="Retries per range")
     parser.add_argument("--no-resume", action="store_true", help="Reprocess all ranges")
+    parser.add_argument(
+        "--adaptive-page-window",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Split a failed range into smaller ranges until it fits the device.",
+    )
+    parser.add_argument(
+        "--min-page-window",
+        type=int,
+        default=25,
+        help="Smallest page range size allowed when adaptive splitting is enabled.",
+    )
     parser.add_argument("--lang", help="OCR language hint")
     parser.add_argument("--device", help="MinerU device, for example cpu or cuda:0")
     parser.add_argument("--backend", help="MinerU backend")
@@ -332,6 +375,8 @@ def main() -> int:
         method=args.method,
         retries=args.retries,
         resume=not args.no_resume,
+        adaptive_page_window=args.adaptive_page_window,
+        min_page_window=args.min_page_window,
         lang=args.lang,
         device=args.device,
         backend=args.backend,

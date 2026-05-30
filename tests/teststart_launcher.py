@@ -70,6 +70,8 @@ def test_large_pdf_passes_vlm_url_option(monkeypatch):
             method="auto",
             retries=1,
             no_resume=False,
+            adaptive_page_window=True,
+            min_page_window=25,
             lang=None,
             backend="vlm-http-client",
             vlm_url="http://127.0.0.1:30000",
@@ -84,3 +86,39 @@ def test_large_pdf_passes_vlm_url_option(monkeypatch):
     assert captured["command"][:2] == [start.sys.executable, "-c"]
     assert "--vlm-url" in captured["command"]
     assert "http://127.0.0.1:30000" in captured["command"]
+
+
+def test_large_pdf_passes_adaptive_options(monkeypatch):
+    captured = {}
+
+    def fake_run_command(command):
+        captured["command"] = command
+        return 0
+
+    monkeypatch.setattr(start, "run_command", fake_run_command)
+
+    result = start.handle_large_pdf(
+        SimpleNamespace(
+            pdf="/tmp/input.pdf",
+            output="/tmp/out",
+            page_window=0,
+            total_pages=None,
+            method="auto",
+            retries=1,
+            no_resume=False,
+            adaptive_page_window=False,
+            min_page_window=10,
+            lang=None,
+            backend="pipeline",
+            vlm_url=None,
+            device="cpu",
+            source="huggingface",
+            no_formula=False,
+            no_table=False,
+        )
+    )
+
+    assert result == 0
+    assert "--no-adaptive-page-window" in captured["command"]
+    assert "--min-page-window" in captured["command"]
+    assert "10" in captured["command"]
