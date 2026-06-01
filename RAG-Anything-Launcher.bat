@@ -12,21 +12,12 @@ if errorlevel 1 (
     exit /b 1
 )
 
-for /f "delims=" %%I in ('wsl.exe wslpath -a "%~dp0"') do set "WSL_PROJECT_DIR=%%I"
-
-if "%WSL_PROJECT_DIR%"=="" (
-    echo Could not resolve this folder inside WSL.
-    echo.
-    pause
-    exit /b 1
-)
-
 :menu
 cls
 echo ==========================================
 echo RAG-Anything Launcher
 echo Project: %~dp0
-echo WSL path: %WSL_PROJECT_DIR%
+echo WSL will open in this project folder.
 echo ==========================================
 echo.
 echo 1. Open interactive starter menu
@@ -107,9 +98,9 @@ goto menu
 :run_wsl
 echo.
 echo Running in WSL:
-echo cd '%WSL_PROJECT_DIR%' ^&^& %~1
+echo %~1
 echo.
-wsl.exe bash -lc "cd '%WSL_PROJECT_DIR%' && %~1"
+wsl.exe --cd "%~dp0" bash -lc "%~1"
 echo.
 echo Command finished with exit code %errorlevel%.
 echo.
