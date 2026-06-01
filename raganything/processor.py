@@ -86,6 +86,7 @@ class ProcessorMixin:
                 "backend",
                 "source",
                 "vlm_url",
+                "api_url",
             ]
         }
         config_dict.update(relevant_kwargs)
@@ -305,6 +306,7 @@ class ProcessorMixin:
                     "backend",
                     "source",
                     "vlm_url",
+                    "api_url",
                 ]
             }
             current_config.update(relevant_kwargs)
@@ -380,6 +382,7 @@ class ProcessorMixin:
                     "backend",
                     "source",
                     "vlm_url",
+                    "api_url",
                 ]
             }
             parse_config.update(relevant_kwargs)

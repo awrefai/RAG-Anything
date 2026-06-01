@@ -75,6 +75,7 @@ def test_large_pdf_passes_vlm_url_option(monkeypatch):
             lang=None,
             backend="vlm-http-client",
             vlm_url="http://127.0.0.1:30000",
+            api_url="http://127.0.0.1:8000",
             device="cpu",
             source="huggingface",
             no_formula=False,
@@ -86,6 +87,8 @@ def test_large_pdf_passes_vlm_url_option(monkeypatch):
     assert captured["command"][:2] == [start.sys.executable, "-c"]
     assert "--vlm-url" in captured["command"]
     assert "http://127.0.0.1:30000" in captured["command"]
+    assert "--api-url" in captured["command"]
+    assert "http://127.0.0.1:8000" in captured["command"]
 
 
 def test_large_pdf_passes_adaptive_options(monkeypatch):
@@ -111,6 +114,7 @@ def test_large_pdf_passes_adaptive_options(monkeypatch):
             lang=None,
             backend="pipeline",
             vlm_url=None,
+            api_url=None,
             device="cpu",
             source="huggingface",
             no_formula=False,
@@ -147,6 +151,7 @@ def test_batch_can_disable_recursion_and_pass_runtime_options(monkeypatch):
             lang="en",
             backend="vlm-http-client",
             vlm_url="http://127.0.0.1:30000",
+            api_url="http://127.0.0.1:8000",
             device="cuda:0",
             source="huggingface",
             no_formula=True,
@@ -163,6 +168,8 @@ def test_batch_can_disable_recursion_and_pass_runtime_options(monkeypatch):
     assert "vlm-http-client" in command
     assert "--vlm_url" in command
     assert "http://127.0.0.1:30000" in command
+    assert "--api_url" in command
+    assert "http://127.0.0.1:8000" in command
     assert "--device" in command
     assert "cuda:0" in command
     assert "--no-formula" in command

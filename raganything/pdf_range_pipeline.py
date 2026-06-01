@@ -497,6 +497,10 @@ def main() -> int:
     parser.add_argument("--device", help="MinerU device when supported")
     parser.add_argument("--backend", help="MinerU backend")
     parser.add_argument("--vlm-url", help="VLM service URL for vlm-http-client")
+    parser.add_argument(
+        "--api-url",
+        help="Reuse an already-running MinerU API server, for example: http://127.0.0.1:8000",
+    )
     parser.add_argument("--source", help="MinerU model source")
     parser.add_argument(
         "--no-formula", action="store_true", help="Disable formula parsing"
@@ -524,6 +528,7 @@ def main() -> int:
         device=args.device,
         backend=args.backend,
         vlm_url=args.vlm_url,
+        api_url=args.api_url,
         source=args.source,
         formula=not args.no_formula,
         table=not args.no_table,

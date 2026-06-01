@@ -71,6 +71,10 @@ def add_parser_options(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--vlm-url", help="VLM HTTP service URL for vlm-http-client.")
     parser.add_argument(
+        "--api-url",
+        help="Reuse an already-running MinerU API server, for example http://127.0.0.1:8000.",
+    )
+    parser.add_argument(
         "--device",
         help="Inference device when supported by the installed parser.",
     )
@@ -92,6 +96,8 @@ def append_common_parser_args(command: List[str], args: argparse.Namespace) -> N
         command.extend(["--backend", args.backend])
     if args.vlm_url:
         command.extend(["--vlm_url", args.vlm_url])
+    if getattr(args, "api_url", None):
+        command.extend(["--api_url", args.api_url])
     if args.device:
         command.extend(["--device", args.device])
     if args.source:
@@ -141,6 +147,8 @@ def handle_batch(args: argparse.Namespace) -> int:
         command.extend(["--backend", args.backend])
     if args.vlm_url:
         command.extend(["--vlm_url", args.vlm_url])
+    if getattr(args, "api_url", None):
+        command.extend(["--api_url", args.api_url])
     if args.device:
         command.extend(["--device", args.device])
     if args.source:
@@ -179,6 +187,8 @@ def handle_large_pdf(args: argparse.Namespace) -> int:
         command.extend(["--backend", args.backend])
     if args.vlm_url:
         command.extend(["--vlm-url", args.vlm_url])
+    if getattr(args, "api_url", None):
+        command.extend(["--api-url", args.api_url])
     if args.device:
         command.extend(["--device", args.device])
     if args.source:
@@ -280,26 +290,28 @@ def interactive() -> int:
         parser_name = prompt("Parser", "mineru", PARSERS)
         method = prompt("Method", "auto", METHODS)
         backend = prompt("Backend", "pipeline", BACKENDS)
+        api_url = prompt("MinerU API URL (blank = auto local service)", "")
         device = prompt("Device", "cpu")
-        return run_command(
-            [
-                python,
-                "start.py",
-                "parse",
-                file_path,
-                "--output",
-                output,
-                "--parser",
-                parser_name,
-                "--method",
-                method,
-                "--backend",
-                backend,
-                "--device",
-                device,
-                "--stats",
-            ]
-        )
+        command = [
+            python,
+            "start.py",
+            "parse",
+            file_path,
+            "--output",
+            output,
+            "--parser",
+            parser_name,
+            "--method",
+            method,
+            "--backend",
+            backend,
+            "--device",
+            device,
+            "--stats",
+        ]
+        if api_url:
+            command.extend(["--api-url", api_url])
+        return run_command(command)
 
     if selection == "2":
         pdf = prompt("PDF path")
@@ -310,6 +322,7 @@ def interactive() -> int:
         vlm_url = ""
         if backend == "vlm-http-client":
             vlm_url = prompt("VLM URL", "http://127.0.0.1:30000")
+        api_url = prompt("MinerU API URL (blank = auto local service)", "")
         device = prompt("Device", "cpu")
         retries = prompt("Retries per run", "1")
         adaptive = prompt_yes_no("Split automatically if the run is too large", True)
@@ -338,6 +351,8 @@ def interactive() -> int:
             command.append("--no-adaptive-page-window")
         if vlm_url:
             command.extend(["--vlm-url", vlm_url])
+        if api_url:
+            command.extend(["--api-url", api_url])
         return run_command(command)
 
     if selection == "3":
@@ -346,6 +361,7 @@ def interactive() -> int:
         parser_name = prompt("Parser", "mineru", PARSERS)
         method = prompt("Method", "auto", METHODS)
         workers = prompt("Workers", "2")
+        api_url = prompt("MinerU API URL (blank = auto local service)", "")
         recursive = prompt_yes_no("Search subfolders", True)
         dry_run = prompt_yes_no("Dry run first", True)
         command = [
@@ -366,6 +382,8 @@ def interactive() -> int:
             command.append("--recursive")
         if dry_run:
             command.append("--dry-run")
+        if api_url:
+            command.extend(["--api-url", api_url])
         return run_command(command)
 
     if selection == "4":
@@ -432,6 +450,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     batch_parser.add_argument("--lang", help="OCR language hint")
     batch_parser.add_argument("--backend", choices=BACKENDS, default="pipeline")
     batch_parser.add_argument("--vlm-url")
+    batch_parser.add_argument("--api-url")
     batch_parser.add_argument("--device")
     batch_parser.add_argument("--source", choices=SOURCES, default="huggingface")
     batch_parser.add_argument("--no-formula", action="store_true")
@@ -465,6 +484,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     pdf_parser.add_argument("--lang")
     pdf_parser.add_argument("--backend", choices=BACKENDS, default="pipeline")
     pdf_parser.add_argument("--vlm-url")
+    pdf_parser.add_argument("--api-url")
     pdf_parser.add_argument("--device")
     pdf_parser.add_argument("--source", choices=SOURCES, default="huggingface")
     pdf_parser.add_argument("--no-formula", action="store_true")

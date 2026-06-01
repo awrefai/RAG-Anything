@@ -138,6 +138,13 @@ uv run python -m raganything.batch_parser ./docs \
   --vlm-url http://127.0.0.1:30000 \
   --device cuda:0
 
+# Reuse one persistent MinerU API service across all files
+uv run mineru-api --host 127.0.0.1 --port 8000
+uv run python -m raganything.batch_parser ./docs \
+  --output ./output \
+  --api-url http://127.0.0.1:8000 \
+  --workers 2
+
 # Without progress bar
 uv run python -m raganything.batch_parser ./docs --output ./output --no-progress
 

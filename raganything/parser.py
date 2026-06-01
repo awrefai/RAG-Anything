@@ -759,6 +759,7 @@ class MineruParser(Parser):
         device: Optional[str] = None,
         source: Optional[str] = None,
         vlm_url: Optional[str] = None,
+        api_url: Optional[str] = None,
         timeout: Optional[int] = None,
         **kwargs,
     ) -> None:
@@ -778,6 +779,7 @@ class MineruParser(Parser):
             device: Inference device
             source: Model source
             vlm_url: When the backend is `vlm-http-client`, you need to specify the server_url
+            api_url: Reuse an already-running MinerU API server instead of starting one locally
             timeout: Maximum seconds to wait for MinerU to complete. None means no limit.
                      Raises TimeoutError if the process does not finish within this duration.
             **kwargs: Additional parameters for subprocess (e.g., env)
@@ -818,6 +820,11 @@ class MineruParser(Parser):
                 )
         if vlm_url:
             cmd.extend(["-u", vlm_url])
+        if api_url:
+            if cls._mineru_supports_option("--api-url"):
+                cmd.extend(["--api-url", api_url])
+            else:
+                cls.logger.debug("MinerU CLI does not support --api-url; skipping")
 
         output_lines = []
         error_lines = []
@@ -2642,7 +2649,15 @@ def main():
     )
     parser.add_argument(
         "--vlm_url",
+        "--vlm-url",
+        dest="vlm_url",
         help="When the backend is `vlm-http-client`, you need to specify the server_url, for example:`http://127.0.0.1:30000`",
+    )
+    parser.add_argument(
+        "--api_url",
+        "--api-url",
+        dest="api_url",
+        help="Reuse an already-running MinerU API server, for example: http://127.0.0.1:8000",
     )
 
     args = parser.parse_args()
@@ -2671,6 +2686,7 @@ def main():
             formula=not args.no_formula,
             table=not args.no_table,
             vlm_url=args.vlm_url,
+            api_url=args.api_url,
         )
 
         print(f"✅ Successfully parsed: {args.file_path}")

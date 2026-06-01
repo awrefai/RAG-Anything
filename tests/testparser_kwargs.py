@@ -80,6 +80,37 @@ def test_mineru_env_propagation(
     assert kwargs["env"]["PATH"] == os.environ["PATH"]
 
 
+@patch.object(MineruParser, "_mineru_supports_option", return_value=True)
+@patch("subprocess.Popen")
+@patch("pathlib.Path.exists")
+@patch("pathlib.Path.mkdir")
+def test_mineru_api_url_forwarded(
+    mock_mkdir,
+    mock_exists,
+    mock_popen,
+    mock_supports_option,
+    mineru_parser,
+    dummy_path,
+):
+    mock_exists.return_value = True
+    mock_process = MagicMock()
+    mock_process.poll.return_value = 0
+    mock_process.wait.return_value = 0
+    mock_process.stdout.readline.return_value = ""
+    mock_process.stderr.readline.return_value = ""
+    mock_popen.return_value = mock_process
+
+    mineru_parser._run_mineru_command(
+        dummy_path,
+        "out",
+        api_url="http://127.0.0.1:8000",
+    )
+
+    command = mock_popen.call_args.args[0]
+    assert "--api-url" in command
+    assert "http://127.0.0.1:8000" in command
+
+
 @patch.object(DoclingParser, "_get_converter")
 def test_docling_env_accepted_but_ignored(
     mock_get_converter, docling_parser, dummy_path, tmp_path

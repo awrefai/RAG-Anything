@@ -425,6 +425,12 @@ def main():
     parser.add_argument(
         "--vlm_url", "--vlm-url", dest="vlm_url", help="VLM service URL"
     )
+    parser.add_argument(
+        "--api_url",
+        "--api-url",
+        dest="api_url",
+        help="Reuse an already-running MinerU API server",
+    )
     parser.add_argument("--device", help="Inference device when supported")
     parser.add_argument(
         "--source",
@@ -470,6 +476,7 @@ def main():
             lang=args.lang,
             backend=args.backend,
             vlm_url=args.vlm_url,
+            api_url=args.api_url,
             device=args.device,
             source=args.source,
             formula=not args.no_formula,

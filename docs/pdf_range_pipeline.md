@@ -30,6 +30,23 @@ uv run python start.py large-pdf large.pdf \
   --device cpu
 ```
 
+To avoid starting a fresh MinerU API service for every range, start one
+persistent service in a separate terminal:
+
+```bash
+uv run mineru-api --host 127.0.0.1 --port 8000
+```
+
+Then reuse it from the range pipeline:
+
+```bash
+uv run python start.py large-pdf large.pdf \
+  --output ./large_pdf_output \
+  --page-window 300 \
+  --adaptive-page-window \
+  --api-url http://127.0.0.1:8000
+```
+
 For VLM HTTP mode:
 
 ```bash
@@ -104,7 +121,8 @@ Use `--no-resume` to force reprocessing every range.
   `start_page` and `end_page` parameters for each successful run.
 - MinerU's CLI owns the local service lifecycle. The pipeline avoids restarts
   by using one large run when possible, and only creates smaller runs when the
-  requested window is too large for the device.
+  requested window is too large for the device. Use `--api-url` with a
+  long-running `mineru-api` service when you want all runs to share one service.
 - Adaptive parent ranges that fail and split are recorded with `split` status
   in `range_manifest.json`; final failed ranges use `failed`.
 - Merged `page_idx` values are offset back to the original document page
