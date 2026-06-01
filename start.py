@@ -72,13 +72,13 @@ def add_parser_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--vlm-url", help="VLM HTTP service URL for vlm-http-client.")
     parser.add_argument(
         "--device",
-        help="Inference device, for example cpu, cuda, cuda:0, npu, or mps.",
+        help="Inference device when supported by the installed parser.",
     )
     parser.add_argument(
         "--source",
         choices=SOURCES,
         default="huggingface",
-        help="Model source.",
+        help="Model source when supported by the installed parser.",
     )
     parser.add_argument("--no-formula", action="store_true", help="Disable formulas.")
     parser.add_argument("--no-table", action="store_true", help="Disable tables.")
@@ -129,10 +129,26 @@ def handle_batch(args: argparse.Namespace) -> int:
     )
     if args.recursive:
         command.append("--recursive")
+    else:
+        command.append("--no-recursive")
     if args.no_progress:
         command.append("--no-progress")
     if args.dry_run:
         command.append("--dry-run")
+    if args.lang:
+        command.extend(["--lang", args.lang])
+    if args.backend:
+        command.extend(["--backend", args.backend])
+    if args.vlm_url:
+        command.extend(["--vlm_url", args.vlm_url])
+    if args.device:
+        command.extend(["--device", args.device])
+    if args.source:
+        command.extend(["--source", args.source])
+    if args.no_formula:
+        command.append("--no-formula")
+    if args.no_table:
+        command.append("--no-table")
     return run_command(command)
 
 
@@ -407,7 +423,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
     batch_parser.add_argument("--method", choices=METHODS, default="auto")
     batch_parser.add_argument("--workers", type=int, default=2)
     batch_parser.add_argument("--timeout", type=int, default=300)
-    batch_parser.add_argument("--recursive", action="store_true", default=True)
+    batch_parser.add_argument(
+        "--recursive",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Search subfolders recursively.",
+    )
+    batch_parser.add_argument("--lang", help="OCR language hint")
+    batch_parser.add_argument("--backend", choices=BACKENDS, default="pipeline")
+    batch_parser.add_argument("--vlm-url")
+    batch_parser.add_argument("--device")
+    batch_parser.add_argument("--source", choices=SOURCES, default="huggingface")
+    batch_parser.add_argument("--no-formula", action="store_true")
+    batch_parser.add_argument("--no-table", action="store_true")
     batch_parser.add_argument("--no-progress", action="store_true")
     batch_parser.add_argument("--dry-run", action="store_true")
     batch_parser.set_defaults(func=handle_batch)

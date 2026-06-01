@@ -122,20 +122,30 @@ print(f"Total processing time: {result['total_processing_time']:.2f} seconds")
 
 ```bash
 # Basic batch processing
-python -m raganything.batch_parser examples/sample_docs/ --output ./output --workers 4
+uv run python -m raganything.batch_parser ./docs --output ./output --workers 4
 
 # With specific parser
-python -m raganything.batch_parser examples/sample_docs/ --parser mineru --method auto
-python -m raganything.batch_parser examples/sample_docs/ --parser paddleocr --method ocr
+uv run python -m raganything.batch_parser ./docs --output ./output --parser mineru --method auto
+uv run python -m raganything.batch_parser ./docs --output ./output --parser paddleocr --method ocr
+
+# Disable recursive subfolder scanning
+uv run python -m raganything.batch_parser ./docs --output ./output --no-recursive
+
+# Pass MinerU runtime options
+uv run python -m raganything.batch_parser ./docs \
+  --output ./output \
+  --backend vlm-http-client \
+  --vlm-url http://127.0.0.1:30000 \
+  --device cuda:0
 
 # Without progress bar
-python -m raganything.batch_parser examples/sample_docs/ --output ./output --no-progress
+uv run python -m raganything.batch_parser ./docs --output ./output --no-progress
 
 # Dry run (list supported files without processing)
-python -m raganything.batch_parser examples/sample_docs/ --output ./output --dry-run
+uv run python -m raganything.batch_parser ./docs --output ./output --dry-run
 
 # Help
-python -m raganything.batch_parser --help
+uv run python -m raganything.batch_parser --help
 ```
 
 ## Configuration
@@ -144,7 +154,8 @@ python -m raganything.batch_parser --help
 
 ```env
 # Batch processing configuration
-MAX_CONCURRENT_FILES=4
+# RAGAnything config default is 1; BatchParser default is 4; start.py batch default is 2.
+MAX_CONCURRENT_FILES=1
 SUPPORTED_FILE_EXTENSIONS=.pdf,.docx,.doc,.pptx,.ppt,.xlsx,.xls,.txt,.md
 RECURSIVE_FOLDER_PROCESSING=true
 PARSER_OUTPUT_DIR=./parsed_output

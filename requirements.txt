@@ -5,6 +5,8 @@ lightrag-hku
 mineru[core]
 # PDF page counting for range-based processing
 pypdf>=4.0.0
+# Runtime environment loading used by raganything.raganything
+python-dotenv
 # Progress bars for batch processing
 tqdm
 # Note: Optional dependencies are now defined in setup.py extras_require:

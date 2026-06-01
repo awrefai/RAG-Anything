@@ -405,10 +405,35 @@ def main():
     )
     parser.add_argument(
         "--recursive",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         default=True,
         help="Search directories recursively",
     )
+    parser.add_argument("--lang", help="OCR language hint")
+    parser.add_argument(
+        "--backend",
+        choices=[
+            "pipeline",
+            "hybrid-auto-engine",
+            "hybrid-http-client",
+            "vlm-auto-engine",
+            "vlm-http-client",
+        ],
+        default="pipeline",
+        help="MinerU backend",
+    )
+    parser.add_argument(
+        "--vlm_url", "--vlm-url", dest="vlm_url", help="VLM service URL"
+    )
+    parser.add_argument("--device", help="Inference device when supported")
+    parser.add_argument(
+        "--source",
+        choices=["huggingface", "modelscope", "local"],
+        default="huggingface",
+        help="Model source when supported",
+    )
+    parser.add_argument("--no-formula", action="store_true", help="Disable formulas")
+    parser.add_argument("--no-table", action="store_true", help="Disable tables")
     parser.add_argument(
         "--timeout", type=int, default=300, help="Timeout per file (seconds)"
     )
@@ -442,6 +467,13 @@ def main():
             parse_method=args.method,
             recursive=args.recursive,
             dry_run=args.dry_run,
+            lang=args.lang,
+            backend=args.backend,
+            vlm_url=args.vlm_url,
+            device=args.device,
+            source=args.source,
+            formula=not args.no_formula,
+            table=not args.no_table,
         )
 
         # Print summary

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import os
 import platform
+import sys
 import hashlib
 import json
 import argparse
@@ -711,6 +712,39 @@ class MineruParser(Parser):
         super().__init__()
 
     @classmethod
+    def _mineru_executable(cls) -> str:
+        mineru_path = shutil.which("mineru")
+        if mineru_path:
+            return mineru_path
+
+        interpreter_dir = Path(sys.executable).parent
+        candidate = interpreter_dir / ("mineru.exe" if _IS_WINDOWS else "mineru")
+        if candidate.exists():
+            return str(candidate)
+
+        return "mineru"
+
+    @classmethod
+    def _mineru_help_text(cls) -> str:
+        try:
+            result = subprocess.run(
+                [cls._mineru_executable(), "--help"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="ignore",
+                check=False,
+            )
+            return f"{result.stdout}\n{result.stderr}"
+        except Exception:
+            return ""
+
+    @classmethod
+    def _mineru_supports_option(cls, *options: str) -> bool:
+        help_text = cls._mineru_help_text()
+        return any(option in help_text for option in options)
+
+    @classmethod
     def _run_mineru_command(
         cls,
         input_path: Union[str, Path],
@@ -749,7 +783,7 @@ class MineruParser(Parser):
             **kwargs: Additional parameters for subprocess (e.g., env)
         """
         cmd = [
-            "mineru",
+            cls._mineru_executable(),
             "-p",
             str(input_path),
             "-o",
@@ -761,7 +795,10 @@ class MineruParser(Parser):
         if backend:
             cmd.extend(["-b", backend])
         if source:
-            cmd.extend(["--source", source])
+            if cls._mineru_supports_option("--source"):
+                cmd.extend(["--source", source])
+            else:
+                cls.logger.debug("MinerU CLI does not support --source; skipping")
         if lang:
             cmd.extend(["-l", lang])
         if start_page is not None:
@@ -773,7 +810,12 @@ class MineruParser(Parser):
         if not table:
             cmd.extend(["-t", "false"])
         if device:
-            cmd.extend(["-d", device])
+            if cls._mineru_supports_option("-d,", "--device"):
+                cmd.extend(["-d", device])
+            else:
+                cls.logger.debug(
+                    "MinerU CLI does not support device selection; skipping"
+                )
         if vlm_url:
             cmd.extend(["-u", vlm_url])
 
@@ -1441,7 +1483,9 @@ class MineruParser(Parser):
             if _IS_WINDOWS:
                 subprocess_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
 
-            result = subprocess.run(["mineru", "--version"], **subprocess_kwargs)
+            result = subprocess.run(
+                [self._mineru_executable(), "--version"], **subprocess_kwargs
+            )
             self.logger.debug(f"MinerU version: {result.stdout.strip()}")
             return True
         except (subprocess.CalledProcessError, FileNotFoundError):
@@ -2559,13 +2603,13 @@ def main():
     parser.add_argument(
         "--device",
         "-d",
-        help="Inference device (e.g., cpu, cuda, cuda:0, npu, mps)",
+        help="Inference device when supported by the installed parser",
     )
     parser.add_argument(
         "--source",
         choices=["huggingface", "modelscope", "local"],
         default="huggingface",
-        help="Model source",
+        help="Model source when supported by the installed parser",
     )
     parser.add_argument(
         "--no-formula",

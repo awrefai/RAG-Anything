@@ -116,6 +116,10 @@ class PDFRangePipeline:
         return f"pages_{start_page + 1:05d}_{end_page + 1:05d}"
 
     @staticmethod
+    def _success_marker_file(range_dir: Path) -> Path:
+        return range_dir / "range_success.json"
+
+    @staticmethod
     def _find_markdown_file(output_dir: Path, pdf_stem: str) -> Optional[Path]:
         preferred = sorted(output_dir.rglob(f"{pdf_stem}.md"))
         if preferred:
@@ -152,6 +156,109 @@ class PDFRangePipeline:
             data = json.load(file)
         if not isinstance(data, list):
             raise ValueError(f"Expected a list in {candidates[0]}")
+        return data
+
+    @classmethod
+    def _find_content_list_file(cls, range_dir: Path) -> Optional[Path]:
+        candidates = sorted(range_dir.rglob("*_content_list.json"))
+        return candidates[0] if candidates else None
+
+    @staticmethod
+    def _jsonable_options(options: Dict[str, Any]) -> Dict[str, Any]:
+        clean: Dict[str, Any] = {}
+        for key, value in options.items():
+            try:
+                json.dumps(value)
+            except TypeError:
+                clean[key] = repr(value)
+            else:
+                clean[key] = value
+        return clean
+
+    @classmethod
+    def _range_metadata(
+        cls,
+        pdf_path: Path,
+        start_page: int,
+        end_page: int,
+        method: str,
+        parser_kwargs: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        stat = pdf_path.stat()
+        return {
+            "pdf_path": str(pdf_path.resolve()),
+            "pdf_size": stat.st_size,
+            "pdf_mtime_ns": stat.st_mtime_ns,
+            "start_page": start_page,
+            "end_page": end_page,
+            "method": method,
+            "parser_kwargs": cls._jsonable_options(parser_kwargs),
+        }
+
+    @classmethod
+    def _write_success_marker(
+        cls,
+        range_dir: Path,
+        pdf_path: Path,
+        start_page: int,
+        end_page: int,
+        method: str,
+        parser_kwargs: Dict[str, Any],
+        markdown_file: Optional[Path],
+        content_list_file: Optional[Path],
+    ) -> None:
+        marker = cls._range_metadata(
+            pdf_path, start_page, end_page, method, parser_kwargs
+        )
+        marker.update(
+            {
+                "status": "success",
+                "markdown_file": str(markdown_file) if markdown_file else None,
+                "content_list_file": (
+                    str(content_list_file) if content_list_file else None
+                ),
+            }
+        )
+        cls._success_marker_file(range_dir).write_text(
+            json.dumps(marker, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    @classmethod
+    def _load_completed_range(
+        cls,
+        range_dir: Path,
+        pdf_path: Path,
+        start_page: int,
+        end_page: int,
+        method: str,
+        parser_kwargs: Dict[str, Any],
+    ) -> Optional[List[Dict[str, Any]]]:
+        marker_file = cls._success_marker_file(range_dir)
+        if not marker_file.exists():
+            return None
+
+        marker = json.loads(marker_file.read_text(encoding="utf-8"))
+        expected = cls._range_metadata(
+            pdf_path, start_page, end_page, method, parser_kwargs
+        )
+        for key, value in expected.items():
+            if marker.get(key) != value:
+                return None
+
+        content_file = marker.get("content_list_file")
+        content_path = (
+            Path(content_file)
+            if content_file
+            else cls._find_content_list_file(range_dir)
+        )
+        if content_path is None or not content_path.exists():
+            return None
+
+        with content_path.open("r", encoding="utf-8") as file:
+            data = json.load(file)
+        if not isinstance(data, list):
+            raise ValueError(f"Expected a list in {content_path}")
         return data
 
     def process_pdf(
@@ -207,7 +314,16 @@ class PDFRangePipeline:
             attempts_used = 0
 
             existing_content_list = (
-                self._load_existing_content_list(range_dir) if resume else None
+                self._load_completed_range(
+                    range_dir,
+                    pdf_path,
+                    start_page,
+                    end_page,
+                    method,
+                    parser_kwargs,
+                )
+                if resume
+                else None
             )
             markdown_file = self._find_markdown_file(range_dir, pdf_stem)
 
@@ -235,6 +351,16 @@ class PDFRangePipeline:
                             **parser_kwargs,
                         )
                         markdown_file = self._find_markdown_file(range_dir, pdf_stem)
+                        self._write_success_marker(
+                            range_dir,
+                            pdf_path,
+                            start_page,
+                            end_page,
+                            method,
+                            parser_kwargs,
+                            markdown_file,
+                            self._find_content_list_file(range_dir),
+                        )
                         status = "success"
                         error = None
                         break
@@ -249,12 +375,16 @@ class PDFRangePipeline:
                             error,
                         )
 
-            if (
-                status == "failed"
-                and adaptive_page_window
-                and (end_page - start_page + 1) > min_page_window
-            ):
-                split_at = start_page + ((end_page - start_page + 1) // 2) - 1
+            current_window = end_page - start_page + 1
+            left_window = current_window // 2
+            right_window = current_window - left_window
+            can_split = (
+                adaptive_page_window
+                and left_window >= min_page_window
+                and right_window >= min_page_window
+            )
+            if status == "failed" and can_split:
+                split_at = start_page + left_window - 1
                 left_range = (start_page, split_at)
                 right_range = (split_at + 1, end_page)
                 self.logger.warning(
@@ -262,6 +392,19 @@ class PDFRangePipeline:
                     range_name,
                     self._range_name(*left_range),
                     self._range_name(*right_range),
+                )
+                range_results.append(
+                    PDFRangeResult(
+                        start_page=start_page,
+                        end_page=end_page,
+                        output_dir=str(range_dir),
+                        markdown_file=str(markdown_file) if markdown_file else None,
+                        content_blocks=len(content_list),
+                        status="split",
+                        error=error,
+                        attempts=attempts_used,
+                        elapsed_seconds=time.time() - started_at,
+                    )
                 )
                 range_queue[0:0] = [left_range, right_range]
                 continue
@@ -351,7 +494,7 @@ def main() -> int:
         help="Smallest page range size allowed when adaptive splitting is enabled.",
     )
     parser.add_argument("--lang", help="OCR language hint")
-    parser.add_argument("--device", help="MinerU device, for example cpu or cuda:0")
+    parser.add_argument("--device", help="MinerU device when supported")
     parser.add_argument("--backend", help="MinerU backend")
     parser.add_argument("--vlm-url", help="VLM service URL for vlm-http-client")
     parser.add_argument("--source", help="MinerU model source")

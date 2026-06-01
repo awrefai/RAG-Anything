@@ -25,6 +25,7 @@ dependencies = [
     "lightrag-hku",
     "mineru[core]",
     "pypdf>=4.0.0",
+    "python-dotenv",
     "tqdm",
 ]
 
@@ -66,7 +67,6 @@ dev-dependencies = [
     "flake8",
     "mypy",
     "openai",
-    "python-dotenv",
 ]
 
 [tool.setuptools.packages.find]

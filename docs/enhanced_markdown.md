@@ -196,21 +196,28 @@ success = converter.convert_markdown_to_pdf(
 ### Command Line Interface
 
 ```bash
+# Starter command with default ReportLab conversion
+uv run python start.py markdown-pdf document.md document.pdf
+
 # Basic conversion
-python -m raganything.enhanced_markdown document.md --output document.pdf
+uv run python -m raganything.enhanced_markdown document.md --output document.pdf
 
 # With specific backend
-python -m raganything.enhanced_markdown document.md --method weasyprint
+uv run python -m raganything.enhanced_markdown document.md --method weasyprint
 
 # With custom CSS file
-python -m raganything.enhanced_markdown document.md --css custom_style.css
+uv run python -m raganything.enhanced_markdown document.md --css custom_style.css
 
 # Show backend information
-python -m raganything.enhanced_markdown --info
+uv run python -m raganything.enhanced_markdown --info
 
 # Help
-python -m raganything.enhanced_markdown --help
+uv run python -m raganything.enhanced_markdown --help
 ```
+
+The `start.py markdown-pdf` command defaults to the lightweight ReportLab path.
+The enhanced module supports `auto`, `weasyprint`, `pandoc`, and
+`pandoc_system` backends.
 
 ## Backend Comparison
 

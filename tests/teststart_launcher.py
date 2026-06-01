@@ -122,3 +122,48 @@ def test_large_pdf_passes_adaptive_options(monkeypatch):
     assert "--no-adaptive-page-window" in captured["command"]
     assert "--min-page-window" in captured["command"]
     assert "10" in captured["command"]
+
+
+def test_batch_can_disable_recursion_and_pass_runtime_options(monkeypatch):
+    captured = {}
+
+    def fake_run_command(command):
+        captured["command"] = command
+        return 0
+
+    monkeypatch.setattr(start, "run_command", fake_run_command)
+
+    result = start.handle_batch(
+        SimpleNamespace(
+            paths=["/tmp/input"],
+            output="/tmp/out",
+            parser="mineru",
+            method="auto",
+            workers=2,
+            timeout=300,
+            recursive=False,
+            no_progress=True,
+            dry_run=True,
+            lang="en",
+            backend="vlm-http-client",
+            vlm_url="http://127.0.0.1:30000",
+            device="cuda:0",
+            source="huggingface",
+            no_formula=True,
+            no_table=True,
+        )
+    )
+
+    assert result == 0
+    command = captured["command"]
+    assert "--no-recursive" in command
+    assert "--lang" in command
+    assert "en" in command
+    assert "--backend" in command
+    assert "vlm-http-client" in command
+    assert "--vlm_url" in command
+    assert "http://127.0.0.1:30000" in command
+    assert "--device" in command
+    assert "cuda:0" in command
+    assert "--no-formula" in command
+    assert "--no-table" in command

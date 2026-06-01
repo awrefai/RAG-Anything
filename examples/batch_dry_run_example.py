@@ -5,12 +5,12 @@ Lists supported files without running any parser.
 
 Usage:
   - pip install:
-      python examples/batch_dry_run_example.py examples/sample_docs --parser mineru
-      python examples/batch_dry_run_example.py examples/sample_docs/projects examples/sample_docs/web --parser docling
-      python examples/batch_dry_run_example.py examples/sample_docs --parser paddleocr
+      python examples/batch_dry_run_example.py ./docs --parser mineru
+      python examples/batch_dry_run_example.py ./docs ./examples --parser docling
+      python examples/batch_dry_run_example.py ./docs --parser paddleocr
   - uv install:
-      uv run python examples/batch_dry_run_example.py examples/sample_docs --parser mineru --recursive
-      uv run python examples/batch_dry_run_example.py examples/sample_docs --parser mineru --no-recursive
+      uv run python examples/batch_dry_run_example.py ./docs --parser mineru --recursive
+      uv run python examples/batch_dry_run_example.py ./docs --parser mineru --no-recursive
 """
 
 import argparse
