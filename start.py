@@ -39,6 +39,19 @@ def run_command(args: List[str]) -> int:
     return subprocess.call(args)
 
 
+def validate_output_argument(output_dir: Optional[str]) -> bool:
+    if not output_dir:
+        return True
+    from raganything.output_safety import validate_output_dir
+
+    try:
+        validate_output_dir(output_dir)
+    except ValueError as exc:
+        print(f"Error: {exc}")
+        return False
+    return True
+
+
 def module_main_command(module: str, *args: str) -> List[str]:
     """Run a module CLI through main() without runpy pre-import warnings."""
     return [
@@ -109,6 +122,8 @@ def append_common_parser_args(command: List[str], args: argparse.Namespace) -> N
 
 
 def handle_parse(args: argparse.Namespace) -> int:
+    if not validate_output_argument(args.output):
+        return 1
     command = module_main_command("raganything.parser", args.file)
     if args.output:
         command.extend(["--output", args.output])
@@ -119,6 +134,8 @@ def handle_parse(args: argparse.Namespace) -> int:
 
 
 def handle_batch(args: argparse.Namespace) -> int:
+    if not validate_output_argument(args.output):
+        return 1
     command = module_main_command(
         "raganything.batch_parser",
         *args.paths,
@@ -161,6 +178,8 @@ def handle_batch(args: argparse.Namespace) -> int:
 
 
 def handle_large_pdf(args: argparse.Namespace) -> int:
+    if not validate_output_argument(args.output):
+        return 1
     command = module_main_command(
         "raganything.pdf_range_pipeline",
         args.pdf,

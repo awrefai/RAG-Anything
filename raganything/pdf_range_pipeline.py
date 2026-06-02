@@ -16,6 +16,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
+from .output_safety import validate_output_dir
 from .parser import MineruParser
 
 
@@ -276,6 +277,8 @@ class PDFRangePipeline:
         merge_content_list: bool = True,
         **parser_kwargs: Any,
     ) -> PDFRangePipelineResult:
+        validate_output_dir(output_dir)
+
         pdf_path = Path(pdf_path)
         if not pdf_path.exists():
             raise FileNotFoundError(f"PDF file does not exist: {pdf_path}")

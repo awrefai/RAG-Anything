@@ -2577,6 +2577,8 @@ def main():
     """
     Main function to run the document parser from command line
     """
+    from .output_safety import validate_output_dir
+
     parser = argparse.ArgumentParser(
         description="Parse documents using MinerU 2.0, Docling, or PaddleOCR"
     )
@@ -2673,6 +2675,8 @@ def main():
             return 1
 
     try:
+        validate_output_dir(args.output)
+
         # Parse the document
         doc_parser = get_parser(args.parser)
         content_list = doc_parser.parse_document(

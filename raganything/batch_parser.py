@@ -15,6 +15,7 @@ import time
 
 from tqdm import tqdm
 
+from .output_safety import validate_output_dir
 from .parser import get_parser
 
 
@@ -185,6 +186,17 @@ class BatchParser:
                 method=parse_method,
                 **kwargs,
             )
+            empty_markdown_files = [
+                path
+                for path in file_output_dir.rglob("*.md")
+                if path.stat().st_size == 0
+            ]
+            if empty_markdown_files:
+                self.logger.warning(
+                    "Processed %s but generated empty markdown file(s): %s",
+                    file_path,
+                    ", ".join(str(path) for path in empty_markdown_files[:5]),
+                )
 
             processing_time = time.time() - start_time
 
@@ -224,6 +236,7 @@ class BatchParser:
             BatchProcessingResult with processing statistics
         """
         start_time = time.time()
+        validate_output_dir(output_dir)
 
         # Filter to supported files
         supported_files = self.filter_supported_files(file_paths, recursive)

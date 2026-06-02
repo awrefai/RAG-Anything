@@ -70,6 +70,12 @@ For very large PDFs such as 5000 pages, start with a bounded window such as
 attempt while still letting adaptive mode shrink ranges that your device cannot
 handle.
 
+Avoid using `RagAnyThing` or `raganything` as an output directory inside the
+repository. On Windows-mounted drives those names can collide with the source
+package directory, which mixes generated parser files into the code tree. Use a
+separate folder such as `./large_pdf_output`, `./rag_output`, or an absolute
+path outside the checkout.
+
 Some MinerU versions expose device/model-source flags and some do not. The
 wrapper accepts `--device` and `--source`, but only forwards them when the
 installed MinerU CLI advertises support.

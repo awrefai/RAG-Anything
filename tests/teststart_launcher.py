@@ -174,3 +174,35 @@ def test_batch_can_disable_recursion_and_pass_runtime_options(monkeypatch):
     assert "cuda:0" in command
     assert "--no-formula" in command
     assert "--no-table" in command
+
+
+def test_batch_rejects_package_output_before_spawning(monkeypatch):
+    def fail_run_command(command):
+        raise AssertionError("run_command should not be called")
+
+    monkeypatch.chdir(PROJECT_ROOT)
+    monkeypatch.setattr(start, "run_command", fail_run_command)
+
+    result = start.handle_batch(
+        SimpleNamespace(
+            paths=["/tmp/input"],
+            output="RagAnyThing",
+            parser="mineru",
+            method="auto",
+            workers=2,
+            timeout=300,
+            recursive=True,
+            no_progress=True,
+            dry_run=True,
+            lang=None,
+            backend="pipeline",
+            vlm_url=None,
+            api_url=None,
+            device=None,
+            source="huggingface",
+            no_formula=False,
+            no_table=False,
+        )
+    )
+
+    assert result == 1

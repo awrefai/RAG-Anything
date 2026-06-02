@@ -155,6 +155,12 @@ uv run python -m raganything.batch_parser ./docs --output ./output --dry-run
 uv run python -m raganything.batch_parser --help
 ```
 
+Avoid using `RagAnyThing` or `raganything` as an output directory inside the
+repository. On Windows-mounted drives those names can collide with the source
+package directory, which mixes generated parser files into the code tree. Use a
+separate folder such as `./batch_output`, `./rag_output`, or an absolute path
+outside the checkout.
+
 ## Configuration
 
 ### Environment Variables
