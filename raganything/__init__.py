@@ -1,6 +1,3 @@
-from .raganything import RAGAnything as RAGAnything
-from .config import RAGAnythingConfig as RAGAnythingConfig
-
 # Core parser class is always available.
 from .parser import Parser as Parser
 
@@ -116,6 +113,14 @@ def get_version() -> str:
 
 
 def __getattr__(name: str):
+    if name == "RAGAnything":
+        from .raganything import RAGAnything
+
+        return RAGAnything
+    if name == "RAGAnythingConfig":
+        from .config import RAGAnythingConfig
+
+        return RAGAnythingConfig
     if name == "PDFRangePipeline":
         from .pdf_range_pipeline import PDFRangePipeline
 

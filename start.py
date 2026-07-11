@@ -12,11 +12,16 @@ Run without arguments for an interactive menu, or pass a workflow command:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shlex
 import shutil
+import signal
+import socket
 import subprocess
 import sys
+import time
+import urllib.request
 from pathlib import Path
 from typing import Iterable, List, Optional
 
@@ -30,6 +35,10 @@ BACKENDS = [
     "vlm-http-client",
 ]
 SOURCES = ["huggingface", "modelscope", "local"]
+PROJECT_ROOT = Path(__file__).resolve().parent
+RUNTIME_DIR = PROJECT_ROOT / ".runtime"
+MINERU_API_PID_FILE = RUNTIME_DIR / "mineru-api.pid"
+MINERU_API_LOG_FILE = RUNTIME_DIR / "mineru-api.log"
 
 
 def run_command(args: List[str]) -> int:
@@ -62,6 +71,225 @@ def module_main_command(module: str, *args: str) -> List[str]:
     ]
 
 
+def _mineru_api_executable() -> str:
+    executable = shutil.which("mineru-api")
+    if executable:
+        return executable
+    candidate = Path(sys.executable).parent / (
+        "mineru-api.exe" if os.name == "nt" else "mineru-api"
+    )
+    return str(candidate) if candidate.exists() else "mineru-api"
+
+
+def _port_is_open(host: str, port: int) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
+def _mineru_api_health(host: str, port: int) -> Optional[dict]:
+    try:
+        with urllib.request.urlopen(
+            f"http://{host}:{port}/health", timeout=1.5
+        ) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+    if (
+        isinstance(payload, dict)
+        and payload.get("status") == "healthy"
+        and isinstance(payload.get("protocol_version"), int)
+    ):
+        return payload
+    return None
+
+
+def _read_service_pid() -> Optional[int]:
+    try:
+        return int(MINERU_API_PID_FILE.read_text(encoding="ascii").strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _pid_is_running(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _pid_is_managed_api(pid: int) -> bool:
+    if not _pid_is_running(pid):
+        return False
+    try:
+        command = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ")
+    except OSError:
+        return False
+    return b"mineru-api" in command
+
+
+def handle_mineru_api(args: argparse.Namespace) -> int:
+    host = args.host
+    port = args.port
+
+    if args.action == "status":
+        pid = _read_service_pid()
+        health = _mineru_api_health(host, port)
+        if health:
+            pid_text = f" (PID {pid})" if pid else ""
+            print(
+                f"MinerU API is running at http://{host}:{port}{pid_text}; "
+                f"protocol {health['protocol_version']}, "
+                f"concurrency {health.get('max_concurrent_requests', 'unknown')}"
+            )
+            return 0
+        if _port_is_open(host, port):
+            print(
+                f"Port {port} is occupied, but the service is not a compatible "
+                "MinerU API"
+            )
+            return 1
+        print(f"MinerU API is not listening at http://{host}:{port}")
+        return 1
+
+    if args.action == "stop":
+        pid = _read_service_pid()
+        if pid is None or not _pid_is_managed_api(pid):
+            MINERU_API_PID_FILE.unlink(missing_ok=True)
+            print("MinerU API managed service is not running")
+            return 0
+        try:
+            os.killpg(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        deadline = time.monotonic() + 10
+        while _pid_is_running(pid) and time.monotonic() < deadline:
+            time.sleep(0.25)
+        if _pid_is_running(pid):
+            os.killpg(pid, signal.SIGKILL)
+        MINERU_API_PID_FILE.unlink(missing_ok=True)
+        print("MinerU API managed service stopped")
+        return 0
+
+    if _mineru_api_health(host, port):
+        print(f"MinerU API is already running at http://{host}:{port}")
+        return 0
+    if _port_is_open(host, port):
+        print(f"Cannot start MinerU API: port {port} is occupied by another service")
+        return 1
+
+    stale_pid = _read_service_pid()
+    if stale_pid and _pid_is_managed_api(stale_pid):
+        print(
+            f"A managed MinerU API process (PID {stale_pid}) is still starting. "
+            f"See {MINERU_API_LOG_FILE}"
+        )
+        return 1
+    MINERU_API_PID_FILE.unlink(missing_ok=True)
+
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    with MINERU_API_LOG_FILE.open("ab") as log_file:
+        process = subprocess.Popen(
+            [
+                _mineru_api_executable(),
+                "--host",
+                host,
+                "--port",
+                str(port),
+            ],
+            cwd=PROJECT_ROOT,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    MINERU_API_PID_FILE.write_text(str(process.pid), encoding="ascii")
+
+    deadline = time.monotonic() + args.startup_timeout
+    while time.monotonic() < deadline:
+        if _mineru_api_health(host, port):
+            print(f"MinerU API started at http://{host}:{port} (PID {process.pid})")
+            print(f"Log: {MINERU_API_LOG_FILE}")
+            return 0
+        if process.poll() is not None:
+            MINERU_API_PID_FILE.unlink(missing_ok=True)
+            print(
+                f"MinerU API exited during startup with code {process.returncode}. "
+                f"See {MINERU_API_LOG_FILE}"
+            )
+            return 1
+        time.sleep(0.5)
+
+    print(
+        f"MinerU API is still starting after {args.startup_timeout}s. "
+        f"Check status again or inspect {MINERU_API_LOG_FILE}"
+    )
+    return 1
+
+
+def handle_doctor(args: argparse.Namespace) -> int:
+    checks = []
+
+    def record(name: str, ok: bool, detail: str) -> None:
+        checks.append(ok)
+        print(f"[{'OK' if ok else 'FAIL'}] {name}: {detail}")
+
+    record(
+        "Python",
+        sys.version_info >= (3, 10),
+        f"{sys.version.split()[0]} at {sys.executable}",
+    )
+    record("uv", shutil.which("uv") is not None, shutil.which("uv") or "not found")
+    mineru = shutil.which("mineru") or str(Path(sys.executable).parent / "mineru")
+    record("MinerU CLI", Path(mineru).exists(), mineru)
+    mineru_api = _mineru_api_executable()
+    record("MinerU API", Path(mineru_api).exists(), mineru_api)
+
+    try:
+        import raganything
+
+        record("RAG-Anything import", True, raganything.__version__)
+    except Exception as exc:
+        record("RAG-Anything import", False, str(exc))
+
+    uv_path = shutil.which("uv")
+    if uv_path:
+        result = subprocess.run(
+            [uv_path, "pip", "check", "--python", sys.executable],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        detail = (result.stdout or result.stderr).strip() or "dependency check complete"
+        record("Dependencies", result.returncode == 0, detail)
+
+    free_gb = shutil.disk_usage(PROJECT_ROOT).free / (1024**3)
+    record("Free disk space", free_gb >= 10, f"{free_gb:.1f} GiB available")
+
+    api_health = _mineru_api_health(args.host, args.port)
+    port_conflict = _port_is_open(args.host, args.port) and api_health is None
+    if port_conflict:
+        record(
+            "MinerU API port",
+            False,
+            f"port {args.port} is occupied by an incompatible service",
+        )
+    print(
+        f"[INFO] Persistent MinerU API: "
+        f"{'running' if api_health else 'not running'} at "
+        f"http://{args.host}:{args.port}"
+    )
+    print(f"[INFO] Runtime log: {MINERU_API_LOG_FILE}")
+
+    if all(checks):
+        print("Readiness check passed")
+        return 0
+    print("Readiness check found one or more blocking issues")
+    return 1
+
+
 def add_parser_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--parser",
@@ -85,7 +313,7 @@ def add_parser_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--vlm-url", help="VLM HTTP service URL for vlm-http-client.")
     parser.add_argument(
         "--api-url",
-        help="Reuse an already-running MinerU API server, for example http://127.0.0.1:8000.",
+        help="Reuse an already-running MinerU API server, for example http://127.0.0.1:18080.",
     )
     parser.add_argument(
         "--device",
@@ -94,7 +322,7 @@ def add_parser_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--source",
         choices=SOURCES,
-        default="huggingface",
+        default=None,
         help="Model source when supported by the installed parser.",
     )
     parser.add_argument("--no-formula", action="store_true", help="Disable formulas.")
@@ -158,6 +386,10 @@ def handle_batch(args: argparse.Namespace) -> int:
         command.append("--no-progress")
     if args.dry_run:
         command.append("--dry-run")
+    if getattr(args, "incremental", False):
+        command.append("--incremental")
+    if getattr(args, "log_file", None):
+        command.extend(["--log-file", args.log_file])
     if args.lang:
         command.extend(["--lang", args.lang])
     if args.backend:
@@ -216,6 +448,8 @@ def handle_large_pdf(args: argparse.Namespace) -> int:
         command.append("--no-formula")
     if args.no_table:
         command.append("--no-table")
+    if getattr(args, "log_file", None):
+        command.extend(["--log-file", args.log_file])
     return run_command(command)
 
 
@@ -299,8 +533,10 @@ def interactive() -> int:
     print("4. Full RAG example")
     print("5. Check parser installation")
     print("6. Convert markdown to PDF")
+    print("7. Full readiness check")
+    print("8. Persistent MinerU API service")
 
-    selection = prompt("Select workflow", "2", ["1", "2", "3", "4", "5", "6"])
+    selection = prompt("Select workflow", "2", ["1", "2", "3", "4", "5", "6", "7", "8"])
     python = sys.executable
 
     if selection == "1":
@@ -310,7 +546,7 @@ def interactive() -> int:
         method = prompt("Method", "auto", METHODS)
         backend = prompt("Backend", "pipeline", BACKENDS)
         api_url = prompt("MinerU API URL (blank = auto local service)", "")
-        device = prompt("Device", "cpu")
+        device = prompt("Device (blank = MinerU default)", "")
         command = [
             python,
             "start.py",
@@ -324,10 +560,10 @@ def interactive() -> int:
             method,
             "--backend",
             backend,
-            "--device",
-            device,
             "--stats",
         ]
+        if device:
+            command.extend(["--device", device])
         if api_url:
             command.extend(["--api-url", api_url])
         return run_command(command)
@@ -342,10 +578,11 @@ def interactive() -> int:
         if backend == "vlm-http-client":
             vlm_url = prompt("VLM URL", "http://127.0.0.1:30000")
         api_url = prompt("MinerU API URL (blank = auto local service)", "")
-        device = prompt("Device", "cpu")
+        device = prompt("Device (blank = MinerU default)", "")
         retries = prompt("Retries per run", "1")
         adaptive = prompt_yes_no("Split automatically if the run is too large", True)
         min_page_window = prompt("Smallest adaptive page window", "25")
+        log_file = prompt("Log file", str(Path(output) / "large_pdf.log"))
         command = [
             python,
             "start.py",
@@ -359,15 +596,17 @@ def interactive() -> int:
             method,
             "--backend",
             backend,
-            "--device",
-            device,
             "--retries",
             retries,
             "--min-page-window",
             min_page_window,
+            "--log-file",
+            log_file,
         ]
         if not adaptive:
             command.append("--no-adaptive-page-window")
+        if device:
+            command.extend(["--device", device])
         if vlm_url:
             command.extend(["--vlm-url", vlm_url])
         if api_url:
@@ -381,7 +620,9 @@ def interactive() -> int:
         method = prompt("Method", "auto", METHODS)
         workers = prompt("Workers", "2")
         api_url = prompt("MinerU API URL (blank = auto local service)", "")
+        log_file = prompt("Log file", str(Path(output) / "batch.log"))
         recursive = prompt_yes_no("Search subfolders", True)
+        incremental = prompt_yes_no("Skip unchanged files from earlier runs", True)
         dry_run = prompt_yes_no("Dry run first", True)
         command = [
             python,
@@ -396,13 +637,21 @@ def interactive() -> int:
             method,
             "--workers",
             workers,
+            "--log-file",
+            log_file,
         ]
         if recursive:
             command.append("--recursive")
-        if dry_run:
-            command.append("--dry-run")
+        if incremental:
+            command.append("--incremental")
         if api_url:
             command.extend(["--api-url", api_url])
+        if dry_run:
+            dry_run_result = run_command([*command, "--dry-run"])
+            if dry_run_result != 0:
+                return dry_run_result
+            if not prompt_yes_no("Run this batch now", False):
+                return 0
         return run_command(command)
 
     if selection == "4":
@@ -435,6 +684,13 @@ def interactive() -> int:
         input_path = prompt("Markdown input path")
         output = prompt("PDF output path", "./output.pdf")
         return run_command([python, "start.py", "markdown-pdf", input_path, output])
+
+    if selection == "7":
+        return run_command([python, "start.py", "doctor"])
+
+    if selection == "8":
+        action = prompt("Action", "status", ["start", "status", "stop"])
+        return run_command([python, "start.py", "mineru-api", action])
 
     print("Unknown selection")
     return 1
@@ -471,11 +727,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
     batch_parser.add_argument("--vlm-url")
     batch_parser.add_argument("--api-url")
     batch_parser.add_argument("--device")
-    batch_parser.add_argument("--source", choices=SOURCES, default="huggingface")
+    batch_parser.add_argument("--source", choices=SOURCES, default=None)
     batch_parser.add_argument("--no-formula", action="store_true")
     batch_parser.add_argument("--no-table", action="store_true")
     batch_parser.add_argument("--no-progress", action="store_true")
     batch_parser.add_argument("--dry-run", action="store_true")
+    batch_parser.add_argument("--log-file")
+    batch_parser.add_argument(
+        "--incremental",
+        action="store_true",
+        help="Skip files unchanged since the previous successful batch run.",
+    )
     batch_parser.set_defaults(func=handle_batch)
 
     pdf_parser = subparsers.add_parser(
@@ -505,9 +767,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     pdf_parser.add_argument("--vlm-url")
     pdf_parser.add_argument("--api-url")
     pdf_parser.add_argument("--device")
-    pdf_parser.add_argument("--source", choices=SOURCES, default="huggingface")
+    pdf_parser.add_argument("--source", choices=SOURCES, default=None)
     pdf_parser.add_argument("--no-formula", action="store_true")
     pdf_parser.add_argument("--no-table", action="store_true")
+    pdf_parser.add_argument("--log-file")
     pdf_parser.set_defaults(func=handle_large_pdf)
 
     rag_parser = subparsers.add_parser("rag", help="Run the full RAG example")
@@ -534,6 +797,22 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default="reportlab",
     )
     markdown_parser.set_defaults(func=handle_markdown_pdf)
+
+    doctor_parser = subparsers.add_parser(
+        "doctor", help="Check whether the local installation is ready"
+    )
+    doctor_parser.add_argument("--host", default="127.0.0.1")
+    doctor_parser.add_argument("--port", type=int, default=18080)
+    doctor_parser.set_defaults(func=handle_doctor)
+
+    api_parser = subparsers.add_parser(
+        "mineru-api", help="Manage the persistent local MinerU API service"
+    )
+    api_parser.add_argument("action", choices=["start", "status", "stop"])
+    api_parser.add_argument("--host", default="127.0.0.1")
+    api_parser.add_argument("--port", type=int, default=18080)
+    api_parser.add_argument("--startup-timeout", type=int, default=90)
+    api_parser.set_defaults(func=handle_mineru_api)
 
     return parser
 

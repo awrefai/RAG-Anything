@@ -6,11 +6,17 @@ with progress reporting and error handling.
 """
 
 import asyncio
+import hashlib
+import json
 import logging
+import os
+import tempfile
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import partial
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import time
 
 from tqdm import tqdm
@@ -30,21 +36,25 @@ class BatchProcessingResult:
     errors: Dict[str, str]
     output_dir: str
     dry_run: bool = False
+    skipped_files: List[str] = field(default_factory=list)
 
     @property
     def success_rate(self) -> float:
         """Calculate success rate as percentage"""
         if self.total_files == 0:
             return 0.0
-        return (len(self.successful_files) / self.total_files) * 100
+        completed_files = len(self.successful_files) + len(self.skipped_files)
+        return (completed_files / self.total_files) * 100
 
     def summary(self) -> str:
         """Generate a summary of the batch processing results"""
         return (
             f"Batch Processing Summary:\n"
             f"  Total files: {self.total_files}\n"
-            f"  Successful: {len(self.successful_files)} ({self.success_rate:.1f}%)\n"
+            f"  Successful: {len(self.successful_files)}\n"
             f"  Failed: {len(self.failed_files)}\n"
+            f"  Skipped: {len(self.skipped_files)}\n"
+            f"  Success rate: {self.success_rate:.1f}%\n"
             f"  Processing time: {self.processing_time:.2f} seconds\n"
             f"  Output directory: {self.output_dir}\n"
             f"  Dry run: {self.dry_run}"
@@ -78,6 +88,10 @@ class BatchParser:
             skip_installation_check: Skip parser installation check (useful for testing)
         """
         self.parser_type = parser_type
+        if max_workers < 1:
+            raise ValueError("max_workers must be greater than zero")
+        if timeout_per_file < 1:
+            raise ValueError("timeout_per_file must be greater than zero")
         self.max_workers = max_workers
         self.show_progress = show_progress
         self.timeout_per_file = timeout_per_file
@@ -136,7 +150,9 @@ class BatchParser:
             elif path.is_dir():
                 if recursive:
                     # Recursively find all files
-                    for file_path in path.rglob("*"):
+                    for file_path in sorted(
+                        path.rglob("*"), key=lambda item: str(item).casefold()
+                    ):
                         if (
                             file_path.is_file()
                             and file_path.suffix.lower() in supported_extensions
@@ -144,7 +160,9 @@ class BatchParser:
                             supported_files.append(str(file_path))
                 else:
                     # Only files in the directory (not subdirectories)
-                    for file_path in path.glob("*"):
+                    for file_path in sorted(
+                        path.glob("*"), key=lambda item: str(item).casefold()
+                    ):
                         if (
                             file_path.is_file()
                             and file_path.suffix.lower() in supported_extensions
@@ -154,10 +172,46 @@ class BatchParser:
             else:
                 self.logger.warning(f"Path does not exist: {path}")
 
-        return supported_files
+        unique_files = {}
+        for file_path in supported_files:
+            key = str(Path(file_path).resolve()).replace("\\", "/").casefold()
+            unique_files.setdefault(key, file_path)
+        return list(unique_files.values())
+
+    @staticmethod
+    def _is_within(path: Path, parent: Path) -> bool:
+        try:
+            path.relative_to(parent)
+            return True
+        except ValueError:
+            return False
+
+    @classmethod
+    def _build_file_output_dirs(
+        cls, file_paths: List[str], output_dir: str
+    ) -> Dict[str, Path]:
+        """Return stable, collision-safe output directories for batch files."""
+        stem_counts = Counter(Path(path).stem.casefold() for path in file_paths)
+        output_root = Path(output_dir)
+        result = {}
+        for file_path in file_paths:
+            source = Path(file_path)
+            folder_name = source.stem
+            if stem_counts[source.stem.casefold()] > 1:
+                path_hash = hashlib.sha256(
+                    str(source.resolve()).encode("utf-8")
+                ).hexdigest()[:8]
+                folder_name = f"{source.stem}_{path_hash}"
+            result[file_path] = output_root / folder_name
+        return result
 
     def process_single_file(
-        self, file_path: str, output_dir: str, parse_method: str = "auto", **kwargs
+        self,
+        file_path: str,
+        output_dir: str,
+        parse_method: str = "auto",
+        file_output_dir: Optional[str] = None,
+        **kwargs,
     ) -> Tuple[bool, str, Optional[str]]:
         """
         Process a single file
@@ -166,6 +220,7 @@ class BatchParser:
             file_path: Path to the file to process
             output_dir: Output directory
             parse_method: Parsing method
+            file_output_dir: Precomputed file-specific output directory
             **kwargs: Additional parser arguments
 
         Returns:
@@ -175,20 +230,23 @@ class BatchParser:
             start_time = time.time()
 
             # Create file-specific output directory
-            file_name = Path(file_path).stem
-            file_output_dir = Path(output_dir) / file_name
-            file_output_dir.mkdir(parents=True, exist_ok=True)
+            target_output_dir = (
+                Path(file_output_dir)
+                if file_output_dir is not None
+                else Path(output_dir) / Path(file_path).stem
+            )
+            target_output_dir.mkdir(parents=True, exist_ok=True)
 
             # Parse the document
             content_list = self.parser.parse_document(
                 file_path=file_path,
-                output_dir=str(file_output_dir),
+                output_dir=str(target_output_dir),
                 method=parse_method,
                 **kwargs,
             )
             empty_markdown_files = [
                 path
-                for path in file_output_dir.rglob("*.md")
+                for path in target_output_dir.rglob("*.md")
                 if path.stat().st_size == 0
             ]
             if empty_markdown_files:
@@ -212,6 +270,168 @@ class BatchParser:
             self.logger.error(error_msg)
             return False, file_path, error_msg
 
+    @staticmethod
+    def _manifest_path(output_dir: str) -> Path:
+        """Return the incremental processing manifest path."""
+        return Path(output_dir) / ".raganything_batch_manifest.json"
+
+    def _load_incremental_manifest(
+        self, output_dir: str
+    ) -> Dict[str, Dict[str, object]]:
+        """Load incremental processing metadata."""
+        manifest_path = self._manifest_path(output_dir)
+        if not manifest_path.exists():
+            return {}
+
+        try:
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.warning(
+                f"Could not read incremental manifest {manifest_path}: {exc}"
+            )
+            return {}
+
+        if not isinstance(data, dict):
+            self.logger.warning(
+                f"Ignoring invalid incremental manifest {manifest_path}: expected object"
+            )
+            return {}
+
+        files = data.get("files", {})
+        return files if isinstance(files, dict) else {}
+
+    def _save_incremental_manifest(
+        self, output_dir: str, manifest: Dict[str, Dict[str, object]]
+    ) -> None:
+        """Persist incremental processing metadata atomically."""
+        manifest_path = self._manifest_path(output_dir)
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "version": 1,
+            "updated_at": time.time(),
+            "files": manifest,
+        }
+        # Write to a uniquely named temp file in the same directory before the
+        # atomic replace. A fixed ".tmp" name would let two concurrent batches
+        # writing to the same output_dir clobber each other's half-written temp.
+        fd, temp_name = tempfile.mkstemp(
+            dir=str(manifest_path.parent),
+            prefix=".raganything_batch_manifest.",
+            suffix=".tmp",
+        )
+        temp_path = Path(temp_name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as temp_file:
+                json.dump(payload, temp_file, indent=2, sort_keys=True)
+            temp_path.replace(manifest_path)
+        except Exception:
+            temp_path.unlink(missing_ok=True)
+            raise
+
+    @staticmethod
+    def _file_metadata(file_path: str) -> Dict[str, object]:
+        """Return cheap stat metadata (resolved path, size, mtime) without hashing."""
+        path = Path(file_path)
+        stat = path.stat()
+        return {
+            "path": str(path.resolve()),
+            "size": stat.st_size,
+            "mtime_ns": stat.st_mtime_ns,
+        }
+
+    @staticmethod
+    def _compute_md5(file_path: str) -> str:
+        """Stream a file and return its md5 hex digest."""
+        md5 = hashlib.md5()
+        with Path(file_path).open("rb") as file_obj:
+            for chunk in iter(lambda: file_obj.read(1024 * 1024), b""):
+                md5.update(chunk)
+        return md5.hexdigest()
+
+    @classmethod
+    def _file_signature(cls, file_path: str) -> Dict[str, object]:
+        """Return size, mtime, and md5 metadata for change detection."""
+        metadata = cls._file_metadata(file_path)
+        metadata["md5"] = cls._compute_md5(file_path)
+        return metadata
+
+    def _filter_incremental_files(
+        self,
+        file_paths: List[str],
+        manifest: Dict[str, Dict[str, object]],
+        config_hash: str,
+    ) -> Tuple[List[str], List[str], Dict[str, Dict[str, object]]]:
+        """Split files into changed and unchanged groups using manifest metadata."""
+        files_to_process = []
+        skipped_files = []
+        signatures = {}
+
+        for file_path in file_paths:
+            try:
+                metadata = self._file_metadata(file_path)
+            except OSError as exc:
+                # File vanished or became unreadable between discovery and the
+                # incremental scan. Treat it as changed so the normal per-file
+                # error path handles it instead of aborting the whole batch.
+                self.logger.warning(
+                    f"Could not read {file_path} for incremental scan: {exc}"
+                )
+                files_to_process.append(file_path)
+                continue
+
+            manifest_key = metadata["path"]
+            metadata["config_hash"] = config_hash
+            previous = manifest.get(manifest_key)
+
+            # Fast path: if size and mtime match a previous run, trust the
+            # stored signature and skip re-hashing the file entirely.
+            if (
+                isinstance(previous, dict)
+                and previous.get("size") == metadata["size"]
+                and previous.get("mtime_ns") == metadata["mtime_ns"]
+                and previous.get("config_hash") == config_hash
+                and "md5" in previous
+            ):
+                signatures[file_path] = previous
+                skipped_files.append(file_path)
+                continue
+
+            # Metadata differs (or the file is new/unrecorded): hash to build a
+            # full signature and compare content.
+            try:
+                metadata["md5"] = self._compute_md5(file_path)
+            except OSError as exc:
+                self.logger.warning(
+                    f"Could not read {file_path} for incremental scan: {exc}"
+                )
+                files_to_process.append(file_path)
+                continue
+
+            signatures[file_path] = metadata
+
+            if previous == metadata:
+                skipped_files.append(file_path)
+            else:
+                files_to_process.append(file_path)
+
+        return files_to_process, skipped_files, signatures
+
+    def _incremental_config_hash(
+        self, parse_method: str, parser_options: Dict[str, object]
+    ) -> str:
+        payload = {
+            "parser_type": self.parser_type,
+            "parse_method": parse_method,
+            "parser_options": parser_options,
+        }
+        serialized = json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        )
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
     def process_batch(
         self,
         file_paths: List[str],
@@ -219,6 +439,7 @@ class BatchParser:
         parse_method: str = "auto",
         recursive: bool = True,
         dry_run: bool = False,
+        incremental: bool = False,
         **kwargs,
     ) -> BatchProcessingResult:
         """
@@ -230,6 +451,8 @@ class BatchParser:
             parse_method: Parsing method for all files
             recursive: Whether to search directories recursively
             dry_run: When True, only list files without processing them
+            incremental: When True, skip files whose size, mtime, and md5 match
+                the previous successful batch run in output_dir
             **kwargs: Additional parser arguments
 
         Returns:
@@ -240,6 +463,20 @@ class BatchParser:
 
         # Filter to supported files
         supported_files = self.filter_supported_files(file_paths, recursive)
+
+        output_path = Path(output_dir).resolve()
+        original_count = len(supported_files)
+        supported_files = [
+            file_path
+            for file_path in supported_files
+            if not self._is_within(Path(file_path).resolve(), output_path)
+        ]
+        excluded_count = original_count - len(supported_files)
+        if excluded_count:
+            self.logger.info(
+                "Excluded %s generated file(s) found inside the output directory",
+                excluded_count,
+            )
 
         if not supported_files:
             self.logger.warning("No supported files found to process")
@@ -255,23 +492,38 @@ class BatchParser:
 
         self.logger.info(f"Found {len(supported_files)} files to process")
 
+        # Create output directory before reading/writing the incremental manifest
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        skipped_files: List[str] = []
+        manifest: Dict[str, Dict[str, object]] = {}
+        signatures: Dict[str, Dict[str, object]] = {}
+        files_to_process = supported_files
+        config_hash = self._incremental_config_hash(parse_method, kwargs)
+        if incremental:
+            manifest = self._load_incremental_manifest(output_dir)
+            files_to_process, skipped_files, signatures = (
+                self._filter_incremental_files(supported_files, manifest, config_hash)
+            )
+            self.logger.info(
+                f"Incremental scan: {len(files_to_process)} changed files, "
+                f"{len(skipped_files)} unchanged files"
+            )
+
         if dry_run:
             self.logger.info(
-                f"Dry run enabled. {len(supported_files)} files would be processed."
+                f"Dry run enabled. {len(files_to_process)} files would be processed."
             )
             return BatchProcessingResult(
-                successful_files=supported_files,
+                successful_files=files_to_process,
                 failed_files=[],
                 total_files=len(supported_files),
                 processing_time=0.0,
                 errors={},
                 output_dir=output_dir,
                 dry_run=True,
+                skipped_files=skipped_files,
             )
-
-        # Create output directory
-        output_path = Path(output_dir)
-        output_path.mkdir(parents=True, exist_ok=True)
 
         # Process files in parallel
         successful_files = []
@@ -282,11 +534,15 @@ class BatchParser:
         pbar = None
         if self.show_progress:
             pbar = tqdm(
-                total=len(supported_files),
+                total=len(files_to_process),
                 desc=f"Processing files ({self.parser_type})",
                 unit="file",
             )
 
+        future_to_file = {}
+        file_output_dirs = self._build_file_output_dirs(files_to_process, output_dir)
+        parser_kwargs = dict(kwargs)
+        parser_kwargs.setdefault("timeout", self.timeout_per_file)
         try:
             with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
                 # Submit all tasks
@@ -296,15 +552,14 @@ class BatchParser:
                         file_path,
                         output_dir,
                         parse_method,
-                        **kwargs,
+                        file_output_dir=str(file_output_dirs[file_path]),
+                        **parser_kwargs,
                     ): file_path
-                    for file_path in supported_files
+                    for file_path in files_to_process
                 }
 
                 # Process completed tasks
-                for future in as_completed(
-                    future_to_file, timeout=self.timeout_per_file
-                ):
+                for future in as_completed(future_to_file):
                     success, file_path, error_msg = future.result()
 
                     if success:
@@ -331,6 +586,13 @@ class BatchParser:
             if pbar:
                 pbar.close()
 
+        if incremental and successful_files:
+            for file_path in successful_files:
+                signature = signatures.get(file_path)
+                if signature:
+                    manifest[signature["path"]] = signature
+            self._save_incremental_manifest(output_dir, manifest)
+
         processing_time = time.time() - start_time
 
         # Create result
@@ -342,6 +604,7 @@ class BatchParser:
             errors=errors,
             output_dir=output_dir,
             dry_run=False,
+            skipped_files=skipped_files,
         )
 
         # Log summary
@@ -356,6 +619,7 @@ class BatchParser:
         parse_method: str = "auto",
         recursive: bool = True,
         dry_run: bool = False,
+        incremental: bool = False,
         **kwargs,
     ) -> BatchProcessingResult:
         """
@@ -367,6 +631,7 @@ class BatchParser:
             parse_method: Parsing method for all files
             recursive: Whether to search directories recursively
             dry_run: When True, only list files without processing them
+            incremental: When True, skip unchanged files based on the batch manifest
             **kwargs: Additional parser arguments
 
         Returns:
@@ -374,16 +639,17 @@ class BatchParser:
         """
         # Run the sync version in a thread pool
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
+        process_func = partial(
             self.process_batch,
-            file_paths,
-            output_dir,
-            parse_method,
-            recursive,
-            dry_run,
+            file_paths=file_paths,
+            output_dir=output_dir,
+            parse_method=parse_method,
+            recursive=recursive,
+            dry_run=dry_run,
+            incremental=incremental,
             **kwargs,
         )
+        return await loop.run_in_executor(None, process_func)
 
 
 def main():
@@ -448,7 +714,7 @@ def main():
     parser.add_argument(
         "--source",
         choices=["huggingface", "modelscope", "local"],
-        default="huggingface",
+        default=None,
         help="Model source when supported",
     )
     parser.add_argument("--no-formula", action="store_true", help="Disable formulas")
@@ -461,13 +727,28 @@ def main():
         action="store_true",
         help="List files that would be processed without running parsers",
     )
+    parser.add_argument(
+        "--incremental",
+        action="store_true",
+        help="Skip files unchanged since the last successful batch run",
+    )
+    parser.add_argument(
+        "--log-file",
+        help="Append batch logs to this file",
+    )
 
     args = parser.parse_args()
 
     # Configure logging
+    log_handlers = [logging.StreamHandler()]
+    if args.log_file:
+        log_path = Path(args.log_file)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_handlers.append(logging.FileHandler(log_path, encoding="utf-8"))
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        handlers=log_handlers,
     )
 
     try:
@@ -477,6 +758,7 @@ def main():
             max_workers=args.workers,
             show_progress=not args.no_progress,
             timeout_per_file=args.timeout,
+            skip_installation_check=args.dry_run or bool(args.api_url),
         )
 
         # Process files
@@ -486,6 +768,7 @@ def main():
             parse_method=args.method,
             recursive=args.recursive,
             dry_run=args.dry_run,
+            incremental=args.incremental,
             lang=args.lang,
             backend=args.backend,
             vlm_url=args.vlm_url,
@@ -506,6 +789,10 @@ def main():
                     print(f"  - {file_path}")
             else:
                 print("\nDry run: no supported files found.")
+            if result.skipped_files:
+                print("\nDry run: unchanged files that would be skipped:")
+                for file_path in result.skipped_files:
+                    print(f"  - {file_path}")
 
         # Exit with error code if any files failed
         if result.failed_files:

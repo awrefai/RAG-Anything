@@ -10,19 +10,18 @@ authors = [
 ]
 description = "RAGAnything: All-in-One RAG System"
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
 requires-python = ">=3.10"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Intended Audience :: Developers",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
     "huggingface_hub",
-    "lightrag-hku",
+    "lightrag-hku<1.5",
     "mineru[core]",
     "pypdf>=4.0.0",
     "python-dotenv",
@@ -69,11 +68,9 @@ dev-dependencies = [
     "openai",
 ]
 
-[tool.setuptools.packages.find]
-include = ["raganything*"]
-
 [tool.setuptools]
-include-package-data = true
+packages = ["raganything"]
+include-package-data = false
 
 [tool.setuptools.dynamic]
 version = {attr = "raganything.__version__"}

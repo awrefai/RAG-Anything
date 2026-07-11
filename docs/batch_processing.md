@@ -139,10 +139,10 @@ uv run python -m raganything.batch_parser ./docs \
   --device cuda:0
 
 # Reuse one persistent MinerU API service across all files
-uv run mineru-api --host 127.0.0.1 --port 8000
+uv run mineru-api --host 127.0.0.1 --port 18080
 uv run python -m raganything.batch_parser ./docs \
   --output ./output \
-  --api-url http://127.0.0.1:8000 \
+  --api-url http://127.0.0.1:18080 \
   --workers 2
 
 # Without progress bar
@@ -150,6 +150,12 @@ uv run python -m raganything.batch_parser ./docs --output ./output --no-progress
 
 # Dry run (list supported files without processing)
 uv run python -m raganything.batch_parser ./docs --output ./output --dry-run
+
+# Incremental run (skip files unchanged since the last successful batch)
+uv run python start.py batch ./docs --output ./output --recursive --incremental
+
+# Persist console logs for later review
+uv run python start.py batch ./docs --output ./output --log-file ./output/batch.log
 
 # Help
 uv run python -m raganything.batch_parser --help
@@ -160,6 +166,27 @@ repository. On Windows-mounted drives those names can collide with the source
 package directory, which mixes generated parser files into the code tree. Use a
 separate folder such as `./batch_output`, `./rag_output`, or an absolute path
 outside the checkout.
+
+### Incremental Folder Scans
+
+Use `incremental=True` when repeatedly processing the same folder. RAG-Anything
+stores a manifest at `.raganything_batch_manifest.json` inside the output
+directory and skips files that are unchanged since the last successful run. A
+file is considered unchanged when its size and modification time match the
+manifest; only when those differ is the MD5 hash recomputed and compared, so
+large unchanged files are not re-hashed on every run.
+
+```python
+result = batch_parser.process_batch(
+    file_paths=["./documents"],
+    output_dir="./output",
+    recursive=True,
+    incremental=True,
+)
+
+print(f"Processed: {len(result.successful_files)}")
+print(f"Skipped unchanged: {len(result.skipped_files)}")
+```
 
 ## Configuration
 
@@ -203,6 +230,7 @@ class BatchProcessingResult:
     errors: Dict[str, str]           # Error messages for failed files
     output_dir: str                  # Output directory used
     dry_run: bool                    # True if run was a dry-run
+    skipped_files: List[str]         # Unchanged files skipped in incremental mode
 
     def summary(self) -> str:        # Human-readable summary
     def success_rate(self) -> float: # Success rate as percentage

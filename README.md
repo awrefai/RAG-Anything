@@ -75,6 +75,7 @@
 ---
 
 ## 🎉 News
+- [X] [2026.06]🎯📢 🎉 [LightRAG](https://github.com/HKUDS/LightRAG) enables multimodal RAG through native integration of RAG-Anything.
 - [X] [2025.10]🎯📢 🚀 We have released the technical report of [RAG-Anything](http://arxiv.org/abs/2510.12323). Access it now to explore our latest research findings.
 - [X] [2025.08]🎯📢 🔍 RAG-Anything now features **VLM-Enhanced Query** mode! When documents include images, the system seamlessly integrates them into VLM for advanced multimodal analysis, combining visual and textual context for deeper insights.
 - [X] [2025.07]🎯📢 RAG-Anything now features a [context configuration module](docs/context_aware_processing.md), enabling intelligent integration of relevant contextual information to enhance multimodal content processing.
@@ -322,6 +323,10 @@ python -c "from raganything import RAGAnything; rag = RAGAnything(); print('✅ 
 Models are downloaded automatically on first use. For manual download, refer to [MinerU Model Source Configuration](https://github.com/opendatalab/MinerU/blob/master/README.md#22-model-source-configuration).
 
 ### Usage Examples
+
+For the Windows double-click launcher, persistent MinerU API, recursive batch
+processing, large-PDF resume, logs, and recovery commands, see
+[Everyday Local Usage](docs/everyday_usage.md).
 
 #### 1. End-to-End Document Processing
 

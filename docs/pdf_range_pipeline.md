@@ -34,7 +34,7 @@ To avoid starting a fresh MinerU API service for every range, start one
 persistent service in a separate terminal:
 
 ```bash
-uv run mineru-api --host 127.0.0.1 --port 8000
+uv run mineru-api --host 127.0.0.1 --port 18080
 ```
 
 Then reuse it from the range pipeline:
@@ -44,8 +44,11 @@ uv run python start.py large-pdf large.pdf \
   --output ./large_pdf_output \
   --page-window 300 \
   --adaptive-page-window \
-  --api-url http://127.0.0.1:8000
+  --api-url http://127.0.0.1:18080
 ```
+
+Add `--log-file ./large_pdf_output/large_pdf.log` to preserve the complete run
+log for later review.
 
 For VLM HTTP mode:
 

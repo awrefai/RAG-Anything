@@ -3,7 +3,6 @@ import sys
 
 import pytest
 
-import raganything.parser as parser_module
 from raganything.parser import PaddleOCRParser, SUPPORTED_PARSERS, get_parser
 
 
@@ -23,8 +22,8 @@ def test_get_parser_rejects_unknown_parser():
 
 def test_parser_module_import_does_not_import_paddleocr():
     sys.modules.pop("paddleocr", None)
-    sys.modules["raganything.parser"] = parser_module
-    importlib.reload(parser_module)
+    sys.modules.pop("raganything.parser", None)
+    importlib.import_module("raganything.parser")
     assert "paddleocr" not in sys.modules
 
 

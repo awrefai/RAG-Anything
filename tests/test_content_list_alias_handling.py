@@ -4,7 +4,6 @@ import types
 import unittest
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -38,11 +37,11 @@ def install_import_stubs():
     raganything_parser.MineruExecutionError = RuntimeError
     raganything_parser.get_parser = lambda *args, **kwargs: None
 
-    sys.modules.setdefault("lightrag", lightrag_module)
-    sys.modules.setdefault("lightrag.utils", lightrag_utils)
-    sys.modules.setdefault("raganything", raganything_pkg)
-    sys.modules.setdefault("raganything.base", raganything_base)
-    sys.modules.setdefault("raganything.parser", raganything_parser)
+    sys.modules["lightrag"] = lightrag_module
+    sys.modules["lightrag.utils"] = lightrag_utils
+    sys.modules["raganything"] = raganything_pkg
+    sys.modules["raganything.base"] = raganything_base
+    sys.modules["raganything.parser"] = raganything_parser
     raganything_base.DocStatus = types.SimpleNamespace(
         READY="ready",
         HANDLING="handling",
@@ -61,13 +60,33 @@ def load_project_module(module_name, path):
     return module
 
 
-install_import_stubs()
-utils_module = load_project_module(
-    "raganything.utils", PROJECT_ROOT / "raganything" / "utils.py"
+_STUB_MODULE_NAMES = (
+    "lightrag",
+    "lightrag.utils",
+    "raganything",
+    "raganything.base",
+    "raganything.parser",
+    "raganything.utils",
+    "raganything.processor",
 )
-processor_module = load_project_module(
-    "raganything.processor", PROJECT_ROOT / "raganything" / "processor.py"
-)
+_missing = object()
+_original_modules = {
+    name: sys.modules.get(name, _missing) for name in _STUB_MODULE_NAMES
+}
+try:
+    install_import_stubs()
+    utils_module = load_project_module(
+        "raganything.utils", PROJECT_ROOT / "raganything" / "utils.py"
+    )
+    processor_module = load_project_module(
+        "raganything.processor", PROJECT_ROOT / "raganything" / "processor.py"
+    )
+finally:
+    for module_name, original in _original_modules.items():
+        if original is _missing:
+            sys.modules.pop(module_name, None)
+        else:
+            sys.modules[module_name] = original
 
 ProcessorMixin = processor_module.ProcessorMixin
 format_table_body = utils_module.format_table_body
@@ -75,6 +94,12 @@ get_equation_text_and_format = utils_module.get_equation_text_and_format
 get_table_body = utils_module.get_table_body
 normalize_caption_list = utils_module.normalize_caption_list
 separate_content = utils_module.separate_content
+extract_section_path_from_content_list = (
+    utils_module.extract_section_path_from_content_list
+)
+extract_neighbor_text_from_content_list = (
+    utils_module.extract_neighbor_text_from_content_list
+)
 
 
 class ContentListAliasHandlingTests(unittest.TestCase):
@@ -141,6 +166,56 @@ class ContentListAliasHandlingTests(unittest.TestCase):
         equation_alias_item = {"equation": "x^2 + y^2 = 1"}
         equation_text, _ = get_equation_text_and_format(equation_alias_item)
         self.assertEqual(equation_text, "x^2 + y^2 = 1")
+
+    def test_image_items_get_section_path_and_neighbor_text_metadata(self):
+        content = [
+            {"type": "text", "text": "1 Introduction", "text_level": 1},
+            {"type": "text", "text": "background paragraph"},
+            {"type": "text", "text": "2 Method", "text_level": 1},
+            {"type": "text", "text": "2.1 Setup", "text_level": 2},
+            {"type": "text", "text": "setup details before image"},
+            {
+                "type": "image",
+                "img_path": "/tmp/figure_30_1.png",
+                "image_caption": ["Figure 30.1 Ablation curve"],
+            },
+            {"type": "text", "text": "discussion after image"},
+        ]
+
+        _, multimodal = separate_content(content)
+        image_item = multimodal[0]
+
+        self.assertEqual(
+            image_item["_section_path"],
+            "2 Method > 2.1 Setup",
+        )
+        self.assertIn("setup details before image", image_item["_neighbor_text"])
+        self.assertIn("discussion after image", image_item["_neighbor_text"])
+
+    def test_image_chunk_template_includes_section_and_neighbor_text(self):
+        processor = ProcessorMixin()
+        chunk = processor._apply_chunk_template(
+            "image",
+            {
+                "img_path": "/tmp/figure_30_1.png",
+                "image_caption": "Figure 30.1 Ablation curve",
+                "image_footnote": "Synthetic sample",
+                "_section_path": "2 Method > 2.1 Setup",
+                "_neighbor_text": "setup details before image discussion after image",
+            },
+            "A line chart comparing model variants.",
+        )
+
+        self.assertIn("Section Path: 2 Method > 2.1 Setup", chunk)
+        self.assertIn(
+            "Neighbor Text: setup details before image discussion after image", chunk
+        )
+        self.assertIn("A line chart comparing model variants.", chunk)
+
+    def test_section_and_neighbor_helpers_handle_invalid_indices(self):
+        content = [{"type": "text", "text": "1 Intro", "text_level": 1}]
+        self.assertEqual(extract_section_path_from_content_list(content, -1), "")
+        self.assertEqual(extract_neighbor_text_from_content_list(content, 99), "")
 
 
 if __name__ == "__main__":

@@ -502,18 +502,28 @@ def main() -> int:
     parser.add_argument("--vlm-url", help="VLM service URL for vlm-http-client")
     parser.add_argument(
         "--api-url",
-        help="Reuse an already-running MinerU API server, for example: http://127.0.0.1:8000",
+        help="Reuse an already-running MinerU API server, for example: http://127.0.0.1:18080",
     )
     parser.add_argument("--source", help="MinerU model source")
     parser.add_argument(
         "--no-formula", action="store_true", help="Disable formula parsing"
     )
     parser.add_argument("--no-table", action="store_true", help="Disable table parsing")
+    parser.add_argument(
+        "--log-file",
+        help="Append range-pipeline logs to this file",
+    )
     args = parser.parse_args()
 
+    log_handlers = [logging.StreamHandler()]
+    if args.log_file:
+        log_path = Path(args.log_file)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_handlers.append(logging.FileHandler(log_path, encoding="utf-8"))
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        handlers=log_handlers,
     )
 
     pipeline = PDFRangePipeline()

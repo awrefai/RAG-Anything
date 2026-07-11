@@ -35,6 +35,7 @@ log/
 .gradio/
 .history/
 temp/
+.runtime/
 
 # IDE / Editor Files
 .idea/

@@ -80,6 +80,7 @@ def test_large_pdf_passes_vlm_url_option(monkeypatch):
             source="huggingface",
             no_formula=False,
             no_table=False,
+            log_file="/tmp/out/large_pdf.log",
         )
     )
 
@@ -89,6 +90,7 @@ def test_large_pdf_passes_vlm_url_option(monkeypatch):
     assert "http://127.0.0.1:30000" in captured["command"]
     assert "--api-url" in captured["command"]
     assert "http://127.0.0.1:8000" in captured["command"]
+    assert "--log-file" in captured["command"]
 
 
 def test_large_pdf_passes_adaptive_options(monkeypatch):
@@ -156,6 +158,8 @@ def test_batch_can_disable_recursion_and_pass_runtime_options(monkeypatch):
             source="huggingface",
             no_formula=True,
             no_table=True,
+            incremental=True,
+            log_file="/tmp/out/batch.log",
         )
     )
 
@@ -174,6 +178,8 @@ def test_batch_can_disable_recursion_and_pass_runtime_options(monkeypatch):
     assert "cuda:0" in command
     assert "--no-formula" in command
     assert "--no-table" in command
+    assert "--incremental" in command
+    assert "--log-file" in command
 
 
 def test_batch_rejects_package_output_before_spawning(monkeypatch):
@@ -206,3 +212,45 @@ def test_batch_rejects_package_output_before_spawning(monkeypatch):
     )
 
     assert result == 1
+
+
+def test_mineru_api_status_reports_running_service(monkeypatch, capsys):
+    monkeypatch.setattr(
+        start,
+        "_mineru_api_health",
+        lambda host, port: {
+            "status": "healthy",
+            "protocol_version": 2,
+            "max_concurrent_requests": 3,
+        },
+    )
+    monkeypatch.setattr(start, "_read_service_pid", lambda: 1234)
+
+    result = start.handle_mineru_api(
+        SimpleNamespace(
+            action="status",
+            host="127.0.0.1",
+            port=8000,
+            startup_timeout=1,
+        )
+    )
+
+    assert result == 0
+    assert "PID 1234" in capsys.readouterr().out
+
+
+def test_mineru_api_status_rejects_unrelated_service(monkeypatch, capsys):
+    monkeypatch.setattr(start, "_mineru_api_health", lambda host, port: None)
+    monkeypatch.setattr(start, "_port_is_open", lambda host, port: True)
+
+    result = start.handle_mineru_api(
+        SimpleNamespace(
+            action="status",
+            host="127.0.0.1",
+            port=8000,
+            startup_timeout=1,
+        )
+    )
+
+    assert result == 1
+    assert "not a compatible MinerU API" in capsys.readouterr().out
