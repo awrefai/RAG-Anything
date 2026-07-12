@@ -1,5 +1,6 @@
 import importlib
 import sys
+from collections import UserDict
 
 import pytest
 
@@ -114,6 +115,39 @@ def test_parse_image_returns_content_list_schema(monkeypatch, tmp_path):
         {"type": "text", "text": "First line", "page_idx": 7},
         {"type": "text", "text": "Second line", "page_idx": 7},
     ]
+
+
+def test_get_ocr_prefers_onnxruntime_engine(monkeypatch):
+    parser = PaddleOCRParser()
+    init_calls = []
+
+    class FakePaddleOCR:
+        def __init__(self, **kwargs):
+            init_calls.append(kwargs)
+
+    monkeypatch.setattr(parser, "_require_paddleocr", lambda: FakePaddleOCR)
+
+    first = parser._get_ocr("en")
+    second = parser._get_ocr("en")
+
+    assert first is second
+    assert init_calls == [{"lang": "en", "engine": "onnxruntime"}]
+
+
+def test_ocr_input_prefers_predict_and_extracts_mapping_results(monkeypatch):
+    parser = PaddleOCRParser()
+
+    class FakeOCR:
+        def predict(self, input_data):
+            assert input_data == "sample.png"
+            return [UserDict({"rec_texts": ["First line", "Second line"]})]
+
+        def ocr(self, input_data, cls=True):
+            raise AssertionError("PaddleOCR 3.x predict() should be preferred")
+
+    monkeypatch.setattr(parser, "_get_ocr", lambda lang=None: FakeOCR())
+
+    assert parser._ocr_input("sample.png") == ["First line", "Second line"]
 
 
 def test_parse_image_preserves_repeated_ocr_lines(monkeypatch, tmp_path):

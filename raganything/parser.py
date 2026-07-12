@@ -39,6 +39,7 @@ import time
 import urllib.parse
 import urllib.request
 import shutil
+from collections.abc import Mapping
 from functools import lru_cache
 from pathlib import Path
 from typing import (
@@ -2262,6 +2263,7 @@ class PaddleOCRParser(Parser):
             return cached
 
         init_candidates = [
+            {"lang": language, "engine": "onnxruntime"},
             {"lang": language, "show_log": False},
             {"lang": language},
             {},
@@ -2303,7 +2305,7 @@ class PaddleOCRParser(Parser):
                 except Exception:
                     pass
 
-            if isinstance(node, dict):
+            if isinstance(node, Mapping):
                 rec_texts = node.get("rec_texts")
                 if isinstance(rec_texts, list):
                     for item in rec_texts:
@@ -2371,15 +2373,15 @@ class PaddleOCRParser(Parser):
     ) -> List[str]:
         ocr = self._get_ocr(lang=lang)
 
+        if hasattr(ocr, "predict"):
+            result = ocr.predict(input_data)
+            return self._extract_text_lines(result)
+
         if hasattr(ocr, "ocr"):
             try:
                 result = ocr.ocr(input_data, cls=cls_enabled)
             except TypeError:
                 result = ocr.ocr(input_data)
-            return self._extract_text_lines(result)
-
-        if hasattr(ocr, "predict"):
-            result = ocr.predict(input_data)
             return self._extract_text_lines(result)
 
         raise RuntimeError(

@@ -91,6 +91,28 @@ upgrade dependencies. This keeps startup deterministic. Logs are appended to
 the paths selected in the launcher. A failed batch exits nonzero and lists each
 failed input in its summary.
 
+For a controlled dependency refresh, stop the MinerU service first and rebuild
+the lock before synchronizing:
+
+```bash
+.venv/bin/python start.py mineru-api stop
+uv self update
+uv lock --upgrade
+uv sync --frozen --all-extras --link-mode copy
+.venv/bin/python -m pytest -q
+.venv/bin/python start.py doctor
+```
+
+MinerU currently supports Python 3.10 through 3.13. The PaddleOCR extra includes
+the CPU PaddlePaddle runtime; RAG-Anything uses PaddleOCR's ONNX Runtime engine
+by default to avoid CPU OneDNN/PIR compatibility failures.
+
+As of 2026-07-12, MinerU 3.4.4 requires Transformers 4.x (`>=4.57.3,<5`). A
+dependency audit reports three Transformers advisories whose fixes are only in
+5.x, so the resolver cannot apply them without leaving MinerU's supported
+range. Keep model sources trusted and update the lock again when MinerU supports
+Transformers 5. Do not force individual transitive packages past `uv.lock`.
+
 Do not use `RagAnyThing` or `raganything` as an output folder inside this
 checkout. On Windows-mounted drives those names collide with the Python source
 package and are rejected deliberately.

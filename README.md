@@ -1114,7 +1114,10 @@ pip install -e ".[paddleocr]"
 uv sync --extra paddleocr
 ```
 
-> **Note**: PaddleOCR also requires `paddlepaddle` (CPU/GPU package varies by platform). Install it with the official guide: https://www.paddlepaddle.org.cn/install/quick
+The extra includes the CPU PaddlePaddle runtime and uses PaddleOCR's ONNX
+Runtime engine by default. For GPU-specific PaddlePaddle builds, follow the
+[official installation guide](https://www.paddlepaddle.org.cn/install/quick)
+and replace the CPU runtime for your platform.
 
 ### MinerU Configuration
 
@@ -1174,7 +1177,7 @@ Different content types require specific optional dependencies:
 - **Office Documents** (.doc, .docx, .ppt, .pptx, .xls, .xlsx): Install [LibreOffice](https://www.libreoffice.org/download/download/)
 - **Extended Image Formats** (.bmp, .tiff, .gif, .webp): Install with `pip install raganything[image]`
 - **Text Files** (.txt, .md): Install with `pip install raganything[text]`
-- **PaddleOCR Parser** (`parser="paddleocr"`): Install with `pip install raganything[paddleocr]`, then install `paddlepaddle` for your platform
+- **PaddleOCR Parser** (`parser="paddleocr"`): Install with `pip install raganything[paddleocr]` (includes the CPU PaddlePaddle and ONNX runtimes)
 
 > **📋 Quick Install**: Use `pip install raganything[all]` to enable all format support (Python dependencies only - LibreOffice still needs separate installation)
 
